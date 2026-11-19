@@ -11,6 +11,7 @@ import { CONFIG } from '../config.js';
 import { lerpAngle } from '../character/PlayerController.js';
 import { indexToAction } from '../shared/protocol.js';
 import { EXERCISES } from '../character/CharacterModel.js';
+import { mapOf, MAPS } from '../shared/towerLayout.js';
 
 const MAX_BUFFER = 40;
 const MAX_EXTRAPOLATE_MS = 150;
@@ -42,6 +43,11 @@ class RemotePlayer {
   push(x, y, z, r, a, t) {
     const last = this.buffer[this.buffer.length - 1];
     if (last && t <= last.t) return; // 순서가 뒤바뀐 패킷 무시
+    // 맵 이동·체크포인트 복귀처럼 순간이동한 경우: 미끄러지듯 날아가지 않게 바로 그 자리로
+    if (last && (mapOf(last.x) !== mapOf(x) || Math.hypot(x - last.x, z - last.z) > 4 || Math.abs(y - last.y) > 4)) {
+      this.buffer.length = 0;
+      this.pos.x = x; this.pos.y = y; this.pos.z = z; this.rot = r;
+    }
     this.buffer.push({ t, x, y, z, r, a: indexToAction(a) });
     if (this.buffer.length > MAX_BUFFER) this.buffer.shift();
   }
@@ -139,6 +145,7 @@ export class RemotePlayers {
     this.scene = scene;
     this.map = new Map();
     this.opts = { blobShadow: true, castShadow: false, showNameTags: true, othersFx: true };
+    this.viewerMap = MAPS.GYM; // 내가 있는 맵 — 다른 맵에 있는 사람은 숨김
     this.clockOffset = null; // 로컬시계 - 서버시계 (가장 빨리 도착한 패킷 기준)
   }
 
@@ -218,7 +225,18 @@ export class RemotePlayers {
    */
   update(dt, viewer) {
     const renderT = performance.now() - CONFIG.INTERPOLATION_DELAY_MS;
-    for (const p of this.map.values()) p.update(dt, renderT);
+    for (const p of this.map.values()) {
+      const vis = mapOf(p.pos.x) === this.viewerMap;
+      if (vis !== p.visible) { p.visible = vis; p.model.root.visible = vis; }
+      p.update(dt, renderT);
+    }
+  }
+
+  /** 같은 맵에 있는 사람 수 */
+  countIn(map) {
+    let n = 0;
+    for (const p of this.map.values()) if (mapOf(p.pos.x) === map) n++;
+    return n;
   }
 
   findByNickname(name) {

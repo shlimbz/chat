@@ -8,7 +8,7 @@ import * as THREE from 'three';
 import { CONFIG } from '../config.js';
 import { Input } from './Input.js';
 import { CameraController } from './CameraController.js';
-import { HitEffects, Sfx } from './Effects.js';
+import { HitEffects, Sfx, TowerMusic } from './Effects.js';
 import { Gym, GYM_SIZE, SPAWN_POINT } from '../world/Gym.js';
 import { CharacterModel } from '../character/CharacterModel.js';
 import { PlayerController } from '../character/PlayerController.js';
@@ -16,6 +16,11 @@ import { HUD } from '../ui/HUD.js';
 import { Menu } from '../ui/Menu.js';
 import { Shop } from '../ui/Shop.js';
 import { RankingPanel } from '../ui/Ranking.js';
+import { NpcDialog, coachPages, towerGuidePages } from '../ui/NpcDialog.js';
+import { Tower } from '../world/Tower.js';
+import {
+  MAPS, mapOf, TOWER_BOUNDS, TOWER_SPAWN, GYM_RETURN, TOWER_CHECKPOINTS, TOWER_STAGES, STAGE_NAMES, FALL_RESET, standingOn,
+} from '../shared/towerLayout.js';
 import { ChatPanel } from '../ui/ChatPanel.js';
 import { TouchControls, isMobile } from '../ui/mobile.js';
 import { keyLabel } from '../ui/dom.js';
@@ -76,21 +81,30 @@ export class Game {
 
     // 월드
     this.gym = new Gym(this.scene);
+    this.gym.setMaxAnisotropy(renderer.capabilities?.getMaxAnisotropy?.() || 1);
+    this.tower = null; // 득근 타워는 처음 들어갈 때 만듦
+    this.map = MAPS.GYM;
+    this._gymBackground = this.scene.background;
     this.effects = new HitEffects(this.scene);
     this.sfx = new Sfx();
+    this.music = new TowerMusic(this.sfx);
+    this.run = { cp: 0, start: 0, done: false, doneMs: 0 };
 
     // 입력 / 카메라
     this.input = new Input();
     const W = GYM_SIZE.width / 2;
     const D = GYM_SIZE.depth / 2;
-    this.cameraCtl = new CameraController(this.camera, renderer.domElement, {
+    this._gymCamBounds = {
       minX: -W, maxX: W, minZ: -D, maxZ: D, maxY: GYM_SIZE.height,
-    });
+    };
+    this.cameraCtl = new CameraController(this.camera, renderer.domElement, { ...this._gymCamBounds });
 
     // 플레이어 (온라인이면 서버가 알려준 마지막 위치에서 시작)
     this.playerModel = new CharacterModel(profile.appearance, { nickname: profile.nickname, admin: !!account?.isAdmin });
     this.scene.add(this.playerModel.root);
     this.player = new PlayerController(this.playerModel, this.input, this.cameraCtl, this.gym.collision);
+    this.player.onJump = () => { if (this.map === MAPS.TOWER) this.sfx.jump(); };
+    this.player.onPad = () => this.sfx.pad();
     const start = welcome?.self ?? { x: SPAWN_POINT.x, z: SPAWN_POINT.z, r: SPAWN_POINT.rotY };
     this.player.teleport(start.x, start.z, start.r);
     this.cameraCtl.snapBehind(start.r);
@@ -139,6 +153,15 @@ export class Game {
         this._setControlsEnabled(true);
       },
     });
+    this.dialog = new NpcDialog(uiRoot, {
+      onFlip: () => this.sfx.blip(),
+      onClose: () => {
+        this.touch?.setVisible(true);
+        this._setControlsEnabled(true);
+      },
+    });
+    this.hud.onTowerRespawn = () => this.towerRespawn(this.run.done ? 'restart' : 'manual');
+    this.hud.onTowerExit = () => this.travel(MAPS.GYM);
     this.hud.onCoinClick = () => this.hud.toast('🛍️ 치장 상점은 서쪽 벽(레그프레스 옆)에 있어요. 가판대 앞에서 E!', 3200);
     this.hud.onBagClick = () => this.openShop(null, 'inventory');
     this.ranking = new RankingPanel(uiRoot, {
@@ -173,6 +196,9 @@ export class Game {
       if (this.input.enabled) this.openShop(null, 'inventory');
     });
     this.input.onPress('Escape', () => this._escape());
+    this.input.onPress('KeyR', () => {
+      if (this.map === MAPS.TOWER && this.input.enabled && !this.chat.isFocused()) this.towerRespawn(this.run.done ? 'restart' : 'manual');
+    });
     this.input.onPress('Enter', (e) => this._openChat(e, ''));
     this.input.onPress('NumpadEnter', (e) => this._openChat(e, ''));
     this.input.onPress('Slash', (e) => this._openChat(e, '/'));
@@ -185,6 +211,12 @@ export class Game {
 
     this._onResize = () => this._resize();
     window.addEventListener('resize', this._onResize);
+    // 안드로이드/아이폰 키보드가 열리고 닫힐 때
+    if (this.mobile && window.visualViewport) {
+      let raf = 0;
+      this._onVV = () => { cancelAnimationFrame(raf); raf = requestAnimationFrame(() => this._resize()); };
+      window.visualViewport.addEventListener('resize', this._onVV);
+    }
     this._resize();
     this._fps = { frames: 0, time: 0 };
   }
@@ -252,6 +284,7 @@ export class Game {
     this.cameraCtl.sensitivity = CONFIG.MOUSE_SENSITIVITY * this.settings.mouseSensitivity;
     this.cameraCtl.invertY = this.settings.invertY;
     this.sfx.enabled = this.settings.sound !== false;
+    this._syncMusic();
 
     this._bindAttackKeys();
 
@@ -379,7 +412,11 @@ export class Game {
         if (w.reason === 'admin') this.hud.toast(`관리자에게서 ${w.gained}코인을 받았어요! 🪙`);
       }
     });
-    net.on(EV.CORRECT, ({ x, y, z }) => this.player.teleport(x, z, this.player.rotY, y));
+    net.on(EV.CORRECT, ({ x, y, z }) => {
+      if (mapOf(x) !== this.map) this._setMap(mapOf(x));
+      this.player.teleport(x, z, this.player.rotY, y);
+    });
+    net.on(EV.TOWER_STATE, (st) => this._onTowerState(st));
     net.on(EV.CHAT, (msg) => {
       this.chat.addMessage(msg);
       // 전체 채팅은 말한 캐릭터 머리 위에 말풍선 (귓속말은 표시 안 함)
@@ -415,6 +452,8 @@ export class Game {
       this._setWallet(w.self?.wallet);
       this.chat.loadInitial(w.chat || []);
       const s = w.self;
+      // 다시 접속하면 서버는 헬스장에 둠 (타워 진행은 처음부터)
+      if (mapOf(s.x) !== this.map) this._setMap(mapOf(s.x));
       if (Math.hypot(s.x - this.player.position.x, s.z - this.player.position.z) > 2) this.player.teleport(s.x, s.z, s.r);
       this._lastSent = '';
       this.chat.setEnabled(true);
@@ -490,7 +529,7 @@ export class Game {
   }
 
   _sendState(dt) {
-    if (!this.network?.connected) return;
+    if (!this.network?.connected || this._respawning || this._traveling) return;
     this._sendTimer += dt;
     if (this._sendTimer < 1 / CLIENT_SEND_HZ) return;
     this._sendTimer = 0;
@@ -520,6 +559,7 @@ export class Game {
     document.body.classList.toggle('chat-mode', v);
     this.touch?.setChatMode(v);
     if (v) this.input.clear();
+    this._resize();
   }
 
   _openChat(e, prefill) {
@@ -529,6 +569,10 @@ export class Game {
   }
 
   _escape() {
+    if (this.dialog.isOpen()) {
+      this.dialog.close();
+      return;
+    }
     if (this.ranking.isOpen()) {
       this.ranking.close();
       return;
@@ -566,8 +610,11 @@ export class Game {
       return;
     }
     const eq = this.nearby;
-    if (!eq || this.player.isDown || !this.player.grounded) return;
-    // 운동이 아닌 상호작용: 상점 / 랭킹 전광판
+    if (!eq || this.player.isDown) return;
+    // 운동이 아닌 상호작용: NPC / 포탈 / 상점 / 랭킹 전광판
+    if (eq.type === 'npc') { this.openNpc(eq.npc); return; }
+    if (eq.type === 'portal') { this.travel(eq.to); return; }
+    if (!this.player.grounded) return;
     if (eq.type === 'shop') { this.openShop(); return; }
     if (eq.type === 'rankboard') { this.openRanking(); return; }
     if (this._occupant(eq)) {
@@ -637,6 +684,7 @@ export class Game {
   }
 
   _zoneName(x, z) {
+    if (this.map === MAPS.TOWER) return `득근 타워 · 높이 ${Math.max(0, this.player.position.y).toFixed(1)}m`;
     if (z > 4.5 && x > 8) return '라운지';
     if (z > 10.8 && Math.abs(x) < 7) return '입구';
     if (x < -5 && z < -7) return '벤치프레스 구역';
@@ -669,23 +717,40 @@ export class Game {
     }
 
     this._autoResolution(rawDt);
+    const ms = this.serverNow();
+    const inTower = this.map === MAPS.TOWER;
+    // 움직이는 발판을 먼저 옮기고 → 그 위의 캐릭터 이동
+    if (inTower) this.tower.update(dt, ms, this.player.position);
+    else this.gym.update(dt, ms, this.player.position);
     this.player.update(dt);
     this.remotePlayers.update(dt);
     this.effects.update(dt);
-    this.gym.update(dt, this.serverNow());
-    this._animateEquipment();
+    if (!inTower) this._animateEquipment();
     this.cameraCtl.update(dt, this.player.position);
+    if (!inTower) this.gym.updateBoardFade(dt, this.camera.position, this.player.position);
+    else this._towerFrame(ms);
     this._sendState(dt);
 
     // 상호작용 대상 탐색
     const p = this.player.position;
     const act = this.player.activity;
-    this.nearby = this.input.enabled && !act && !this.chat.isFocused() ? this.gym.findNearestInteractable(p.x, p.z, CONFIG.INTERACT_RANGE) : null;
+    const world = inTower ? this.tower : this.gym;
+    const canAct = this.input.enabled && !this.chat.isFocused();
+    this.nearby = canAct && !act ? world.findNearestInteractable(p.x, p.z, CONFIG.INTERACT_RANGE, p.y) : null;
+    // 포탈 고리 안으로 걸어 들어가면 바로 이동
+    if (canAct && !act && !this._traveling && performance.now() > (this._portalCooldown || 0)) {
+      const portal = world.portalAt(p.x, p.y, p.z);
+      if (portal) this.travel(inTower ? MAPS.GYM : MAPS.TOWER);
+    }
     let prompt = '';
     if (act) prompt = act.it.type === 'seat' ? '일어나기' : `${act.it.label} 그만하기`;
     else if (this.nearby) {
       prompt = {
-        seat: '앉기', shop: '🛍️ 상점 열기', rankboard: '🏆 랭킹 자세히',
+        seat: '앉기',
+        shop: '🛍️ 상점 열기',
+        rankboard: '🏆 랭킹 자세히',
+        npc: '💬 말 걸기',
+        portal: this.nearby.to === MAPS.TOWER ? '🗼 득근 타워로' : '🏋️ 헬스장으로',
       }[this.nearby.type] || `${this.nearby.label} 운동하기`;
     }
     this.hud.setPrompt(prompt && !this.mobile ? `<kbd>E</kbd> ${prompt}` : '');
@@ -696,11 +761,227 @@ export class Game {
     this.renderer.render(this.scene, this.camera);
   }
 
+  // ── NPC ───────────────────────────────────────────
+  openNpc(kind) {
+    if (this.dialog.isOpen() || this.shop.isOpen() || this.creator.isOpen() || this.ranking.isOpen()) return;
+    if (this.player.activity) this.player.stopActivity();
+    this.menu.close();
+    this._setControlsEnabled(false);
+    this.touch?.setVisible(false);
+    if (kind === 'tower') {
+      this.dialog.open('타워 안내원 핑키', towerGuidePages(this.mobile));
+    } else {
+      const keys = { ...DEFAULT_SETTINGS.keys, ...(this.settings.keys || {}) };
+      this.dialog.open('안내 코치 득근', coachPages(this.mobile, { punch: keyLabel(keys.punch), kick: keyLabel(keys.kick) }));
+    }
+    this.sfx.blip();
+  }
+
+  // ── 맵 이동 / 득근 타워 ─────────────────────────────
+  /** 포탈로 맵 이동 (온라인이면 서버가 포탈 근처인지 확인한 뒤 옮겨 줌) */
+  async travel(to) {
+    if (this._traveling || to === this.map) return;
+    if (this.network && !this.network.connected) {
+      this.hud.toast('서버와 연결된 뒤에 이동할 수 있어요.');
+      return;
+    }
+    this._traveling = true;
+    this._portalCooldown = performance.now() + 1500;
+    if (this.player.activity) this.player.stopActivity();
+    try {
+      let dest;
+      if (this.network) {
+        const r = await this.network.travel(to);
+        if (!r?.ok) { this.hud.toast(r?.message || '지금은 이동할 수 없어요.'); return; }
+        dest = r;
+      } else {
+        // 오프라인 모드
+        const d = to === MAPS.TOWER ? TOWER_SPAWN : GYM_RETURN;
+        dest = { x: d.x, y: 0, z: d.z, r: d.r };
+      }
+      this._setMap(to);
+      this.player.teleport(dest.x, dest.z, dest.r, dest.y || 0);
+      this.cameraCtl.snapBehind(dest.r);
+      this._lastSent = '';
+      this.sfx.portal();
+      this.hud.flash(to === MAPS.TOWER ? 'rgba(142,107,216,0.5)' : 'rgba(61,125,216,0.45)');
+      if (to === MAPS.TOWER) {
+        this.run = { cp: 0, start: performance.now(), done: false, doneMs: 0 };
+        this.tower.setReached(0);
+        this.hud.toast(`🗼 득근 타워! 초록 발판에서 출발해 꼭대기까지 올라가요. 안내원에게 ${this.mobile ? '[말 걸기]를 누르' : 'E 로 말을 걸'}면 방법을 알려줘요.`, 5000);
+      } else {
+        this.hud.toast('헬스장으로 돌아왔어요.');
+      }
+    } catch {
+      this.hud.toast('서버 응답이 없어요. 잠시 후 다시 시도해 주세요.');
+    } finally {
+      this._traveling = false;
+      this._portalCooldown = performance.now() + 1500;
+    }
+  }
+
+  /** 지금 있는 맵 바꾸기 (화면·충돌·카메라·배경음악) */
+  _setMap(map) {
+    if (map === MAPS.TOWER && !this.tower) {
+      this.tower = new Tower(this.scene);
+      console.info(`[Tower] 정적 메시 병합: ${this.tower.batchStats.before}개 → ${this.tower.batchStats.after}개`);
+    }
+    this.map = map;
+    const tower = map === MAPS.TOWER;
+    this.tower?.setActive(tower);
+    this.gym.root.visible = !tower;
+    this.player.collision = tower ? this.tower.collision : this.gym.collision;
+    this.cameraCtl.bounds = tower ? { ...TOWER_BOUNDS, maxY: 60 } : { ...this._gymCamBounds };
+    this.scene.background = tower ? this.tower.sky : this._gymBackground;
+    // 그림자용 햇빛도 지금 맵 쪽으로
+    const ox = tower ? TOWER_BOUNDS.minX + (TOWER_BOUNDS.maxX - TOWER_BOUNDS.minX) / 2 : 0;
+    this.gym.sun.position.set(ox + 9, 18 + (tower ? 12 : 0), 7);
+    this.gym.sun.target.position.set(ox, 0, 0);
+    this.remotePlayers.viewerMap = map;
+    this.dialog.close();
+    if (!tower) this.hud.setTower(null);
+    this._syncMusic();
+    this._updateOnline();
+  }
+
+  _syncMusic() {
+    if (!this.music) return;
+    const on = this.map === MAPS.TOWER && this.settings.sound !== false && this.settings.music !== false;
+    if (on) this.music.start();
+    else this.music.stop();
+  }
+
+  /** 체크포인트로 되돌리기: kind = 'fail'(함정·추락) | 'manual'(R 키) | 'restart'(처음부터) */
+  async towerRespawn(kind = 'manual') {
+    if (this.map !== MAPS.TOWER || this._respawning || this._traveling) return;
+    this._respawning = true;
+    if (kind === 'fail') {
+      this.sfx.fail();
+      this.hud.flash();
+    }
+    if (this.player.activity) this.player.stopActivity();
+    if (kind === 'restart') this.run = { cp: 0, start: performance.now(), done: false, doneMs: 0 };
+    const cp = TOWER_CHECKPOINTS[this.run.cp] || TOWER_CHECKPOINTS[0];
+    let dest = { x: cp.x, y: cp.top, z: cp.z };
+    try {
+      if (this.network?.connected) {
+        const r = await this.network.towerRespawn(kind === 'restart');
+        if (r?.ok) {
+          dest = r;
+          // 서버가 기억한 체크포인트가 기준
+          if (Number.isInteger(r.cp)) this.run.cp = r.cp;
+        }
+      }
+    } catch { /* 응답이 없으면 내 화면 기준으로 */ }
+    if (this.map === MAPS.TOWER) {
+      this.player.teleport(dest.x, dest.z, this.player.rotY, dest.y);
+      this.player.downUntil = 0;
+      this.tower.setReached(this.run.cp);
+    }
+    this._lastSent = '';
+    this._respawning = false;
+  }
+
+  /**
+   * 체크포인트 도착 처리 (내 화면에서 밟았을 때 / 서버가 먼저 알려줬을 때 공통)
+   * @param {boolean} local 내 화면에서 밟은 경우 → 서버에도 위치를 즉시 전송
+   */
+  _reachCheckpoint(i, local) {
+    const run = this.run;
+    const cp = TOWER_CHECKPOINTS[i];
+    if (!cp || i <= run.cp) return;
+    run.cp = i;
+    this.tower.setReached(i);
+    // 서버도 바로 알 수 있게 지금 위치를 즉시 전송 (밟자마자 뛰어도 체크포인트 저장)
+    if (local && this.network?.connected) {
+      const st = this.player.getNetworkState();
+      this.network.sendMove(st);
+      this._lastSent = st.join(',');
+    }
+    if (!cp.goal) {
+      this.sfx.checkpoint();
+      this.hud.pop('CHECKPOINT!', '#39d98a');
+      return;
+    }
+    if (run.done) return;
+    run.done = true;
+    run.doneMs = performance.now() - run.start;
+    this.sfx.win();
+    this.hud.pop('🏆 CLEAR!', '#ffd84a');
+    const best = this._towerBest();
+    const record = !best || run.doneMs < best;
+    if (record) {
+      this._bestMs = Math.round(run.doneMs);
+      try { window.localStorage.setItem('onlinegym.tower.best', String(this._bestMs)); } catch { /* 저장 불가 */ }
+    }
+    // 온라인이면 서버 보상 결과와 함께 안내 (_onTowerState)
+    if (!this.network) this.hud.toast(`🏆 정상 도착! ${record ? '새 최고 기록' : '기록'} ${fmtRun(run.doneMs)}`, 4000);
+  }
+
+  _onTowerState(st) {
+    if (this.map !== MAPS.TOWER || !st) return;
+    if (Number.isInteger(st.cp) && st.cp > this.run.cp) this._reachCheckpoint(st.cp, false);
+    if (st.clearMs !== undefined) {
+      if (st.tooFast) this.hud.toast('기록이 너무 빨라서 보상이 지급되지 않았어요.', 4000);
+      else if (st.coins > 0) this.hud.toast(`🏆 정상 도착! 보상 ${st.coins}코인`, 4000);
+      else this.hud.toast('🏆 정상 도착! (이번 시간 코인 상한에 도달해 보상은 없어요)', 4000);
+    }
+  }
+
+  /** 타워에서 매 프레임: 체크포인트 · 함정 · 추락 · 시계 */
+  _towerFrame(ms) {
+    const p = this.player.position;
+    const run = this.run;
+    if (!this._respawning && !this._traveling) {
+      // 체크포인트 (발을 딛고 섰을 때)
+      if (this.player.grounded) {
+        for (let i = TOWER_CHECKPOINTS.length - 1; i > run.cp; i--) {
+          const cp = TOWER_CHECKPOINTS[i];
+          if (!standingOn(cp, p.x, p.y, p.z)) continue;
+          this._reachCheckpoint(i, true);
+          break;
+        }
+      }
+      // 함정 / 추락
+      const fell = p.y < (TOWER_CHECKPOINTS[run.cp]?.top ?? 0) - FALL_RESET;
+      if (fell || this.tower.hazard(p, ms)) this.towerRespawn('fail');
+    }
+    // 위쪽 진행 표시
+    const best = this._towerBest();
+    this.hud.setTower({
+      stage: run.cp, total: TOWER_STAGES, name: STAGE_NAMES[Math.min(run.cp, STAGE_NAMES.length - 1)], done: run.done, best: best ? fmtRun(best) : '',
+    });
+    const cpLabel = run.done ? '처음부터' : '체크포인트';
+    if (this._cpLabel !== cpLabel) {
+      this._cpLabel = cpLabel;
+      this.hud.towerCpBtn.querySelector('span').textContent = cpLabel;
+    }
+    this.hud.setTowerTime(fmtRun(run.done ? run.doneMs : performance.now() - run.start), run.done);
+  }
+
+  _towerBest() {
+    if (this._bestMs === undefined) {
+      try { this._bestMs = Number(window.localStorage.getItem('onlinegym.tower.best')) || 0; } catch { this._bestMs = 0; }
+    }
+    return this._bestMs;
+  }
+
   _resize() {
-    const w = this.container.clientWidth || window.innerWidth;
-    const h = this.container.clientHeight || window.innerHeight;
+    // 모바일: 키보드가 올라오면 "보이는 영역"(키보드 위)에 맞춰 게임 화면을 다시 맞춤
+    const vv = this.mobile ? window.visualViewport : null;
+    const w = Math.round(vv?.width || this.container.clientWidth || window.innerWidth);
+    const h = Math.round(vv?.height || this.container.clientHeight || window.innerHeight);
     this.renderer.setSize(w, h);
     this.camera.aspect = w / h;
+    // 모바일 채팅 중: 아래쪽은 채팅이 덮으므로, 내 캐릭터가 화면 위쪽(약 20% 지점)에 오도록 화면을 올려서 그림
+    if (this.mobile && this.chatMode) this.camera.setViewOffset(w, h * 1.6, 0, h * 0.6, w, h);
+    else this.camera.clearViewOffset();
     this.camera.updateProjectionMatrix();
   }
+}
+
+/** 기록 표시 m:ss.d */
+function fmtRun(ms) {
+  const t = Math.max(0, ms);
+  return `${Math.floor(t / 60000)}:${String(Math.floor((t % 60000) / 1000)).padStart(2, '0')}.${Math.floor((t % 1000) / 100)}`;
 }

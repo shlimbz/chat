@@ -9,6 +9,9 @@ import {
 } from '../../../client/js/shared/gymLayout.js';
 import { findPunchingBagTarget } from '../../../client/js/world/bagCollision.js';
 import { bagInZone } from '../../../client/js/shared/bagMotion.js';
+import {
+  MAPS, GYM_PORTAL, GYM_RETURN, PORTAL_RANGE, TOWER_SPAWN, TOWER_CHECKPOINTS, MIN_CLEAR_MS, CLEAR_REWARD, standingOn,
+} from '../../../client/js/shared/towerLayout.js';
 import { PlayerRegistry } from '../game/PlayerRegistry.js';
 import { resolveAttack } from '../game/combat.js';
 import {
@@ -66,6 +69,41 @@ export function attachGameHandlers(io, {
     }
   };
   const broadcastSystem = (text) => io.emit(EV.CHAT, ChatService.system(text));
+
+  // ── 득근 타워 ──
+  const fmtClear = (ms) => `${Math.floor(ms / 60000)}:${String(Math.floor((ms % 60000) / 1000)).padStart(2, '0')}.${Math.floor((ms % 1000) / 100)}`;
+  /** 다음 접속 위치: 타워에 있었으면 헬스장 포탈 앞 */
+  const lastSeenOf = (p) => (p.map === MAPS.TOWER ? { x: GYM_RETURN.x, z: GYM_RETURN.z, r: GYM_RETURN.r } : { x: p.x, z: p.z, r: p.r });
+  const startTowerRun = (p, now = Date.now()) => {
+    p.tcp = 0;
+    p.tStart = now;
+    p.tCleared = false;
+  };
+  const towerState = (p, extra = {}) => {
+    io.to(p.socketId).emit(EV.TOWER_STATE, { cp: p.tcp, startedAt: p.tStart, ...extra });
+  };
+  /** 이동이 반영된 뒤: 다음 체크포인트(이후 아무 체크포인트) 위에 서 있으면 통과 */
+  const towerProgress = (p, now = Date.now()) => {
+    for (let i = TOWER_CHECKPOINTS.length - 1; i > p.tcp; i--) {
+      const cp = TOWER_CHECKPOINTS[i];
+      if (!standingOn(cp, p.x, p.y, p.z)) continue;
+      p.tcp = i;
+      if (!cp.goal) { towerState(p); return; }
+      if (p.tCleared) { towerState(p); return; }
+      p.tCleared = true;
+      const ms = now - p.tStart;
+      if (ms < MIN_CLEAR_MS) {
+        towerState(p, { clearMs: ms, coins: 0, tooFast: true });
+        log(`[tower] ${p.nickname} 비정상적으로 빠른 클리어 (${ms}ms) — 보상 없음`);
+        return;
+      }
+      const got = economy.earn(p.accountId, CLEAR_REWARD);
+      if (got > 0) sendWallet(p.accountId, { gained: got, reason: 'tower' });
+      towerState(p, { clearMs: ms, coins: got });
+      broadcastSystem(`🏆 ${p.nickname}님이 득근 타워 정상에 올랐습니다! (${fmtClear(ms)})`);
+      return;
+    }
+  };
 
   /** 플레이어 연결 강제 종료 */
   const kickPlayer = (p, reason) => {
@@ -240,6 +278,45 @@ export function attachGameHandlers(io, {
       if (!p) return;
       const res = registry.applyMove(p, msg);
       if (res === 'corrected') socket.emit(EV.CORRECT, { x: p.x, y: p.y, z: p.z });
+      else if (res === 'ok' && p.map === MAPS.TOWER) towerProgress(p);
+    });
+
+    // ── 맵 이동 (포탈): 서버가 아는 위치로 포탈 근처인지 확인 ──
+    socket.on(EV.MAP_TRAVEL, (req, ack) => {
+      if (typeof ack !== 'function') return;
+      const p = registry.get(socket.id);
+      if (!p) { ack({ ok: false, message: '잘못된 요청입니다.' }); return; }
+      const to = req?.to;
+      if (to === MAPS.TOWER && p.map === MAPS.GYM) {
+        if (Math.hypot(p.x - GYM_PORTAL.x, p.z - GYM_PORTAL.z) > PORTAL_RANGE) {
+          ack({ ok: false, message: '포탈 가까이에서만 이동할 수 있어요.' });
+          return;
+        }
+        registry.place(p, TOWER_SPAWN, MAPS.TOWER);
+        startTowerRun(p);
+      } else if (to === MAPS.GYM && p.map === MAPS.TOWER) {
+        // 타워 어디서든 헬스장으로 돌아갈 수 있음 (포탈 앞에 도착)
+        registry.place(p, GYM_RETURN, MAPS.GYM);
+      } else {
+        ack({ ok: false, message: '지금은 이동할 수 없어요.' });
+        return;
+      }
+      ack({
+        ok: true, map: p.map, x: p.x, y: p.y, z: p.z, r: p.r, cp: p.tcp ?? 0, startedAt: p.tStart ?? Date.now(),
+      });
+    });
+
+    // ── 타워: 체크포인트로 되돌리기 / 처음부터 ──
+    socket.on(EV.TOWER_RESPAWN, (req, ack) => {
+      if (typeof ack !== 'function') return;
+      const p = registry.get(socket.id);
+      if (!p || p.map !== MAPS.TOWER) { ack({ ok: false }); return; }
+      if (req?.restart) startTowerRun(p);
+      const cp = TOWER_CHECKPOINTS[p.tcp] || TOWER_CHECKPOINTS[0];
+      registry.place(p, { x: cp.x, y: cp.top, z: cp.z }, MAPS.TOWER);
+      ack({
+        ok: true, x: p.x, y: p.y, z: p.z, r: p.r, cp: p.tcp, startedAt: p.tStart,
+      });
     });
 
     // ── 핑 측정 ──────────────────────────────────────
@@ -417,7 +494,7 @@ export function attachGameHandlers(io, {
       }
       const p = registry.remove(socket.id);
       if (!p) return; // 중복 접속으로 교체된 경우
-      characters.saveLastSeen(p.id, { x: p.x, z: p.z, r: p.r }).catch((err) => log('[db] 위치 저장 실패', err));
+      characters.saveLastSeen(p.id, lastSeenOf(p)).catch((err) => log('[db] 위치 저장 실패', err));
       limiter.forget(p.id);
       io.emit(EV.PLAYER_LEAVE, { id: p.id });
       broadcastSystem(`${p.nickname}님이 퇴장했습니다.`);
@@ -479,7 +556,7 @@ export function attachGameHandlers(io, {
       clearInterval(rankingTimer);
       await economy.flushAll();
       await stats.flush().catch(() => {});
-      await Promise.allSettled(registry.list().map((p) => characters.saveLastSeen(p.id, { x: p.x, z: p.z, r: p.r })));
+      await Promise.allSettled(registry.list().map((p) => characters.saveLastSeen(p.id, lastSeenOf(p))));
     },
   };
 }

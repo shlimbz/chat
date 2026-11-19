@@ -209,6 +209,7 @@ export class Menu {
     this.autoResInput = el('input', { attrs: { type: 'checkbox' } });
     this.fpsCapInput = el('input', { attrs: { type: 'checkbox' } });
     this.othersFxInput = el('input', { attrs: { type: 'checkbox' } });
+    this.musicInput = el('input', { attrs: { type: 'checkbox' } });
     this.keys = { ...DEFAULT_SETTINGS.keys };
     this.keyBtns = {};
     this.keyMsg = el('div', { class: 'menu-hint' });
@@ -225,13 +226,14 @@ export class Menu {
         autoRes: this.autoResInput.checked,
         fpsCap: this.fpsCapInput.checked,
         othersFx: this.othersFxInput.checked,
+        music: this.musicInput.checked,
         keys: { ...this.keys },
       };
       this.sensValue.textContent = `${s.mouseSensitivity.toFixed(1)}x`;
       this.h.onSettingsChange?.(s);
     };
     this._emitSettings = emit;
-    for (const input of [this.sensInput, this.invertInput, this.nameTagInput, this.fpsInput, this.soundInput, this.autoResInput, this.fpsCapInput, this.othersFxInput]) {
+    for (const input of [this.sensInput, this.invertInput, this.nameTagInput, this.fpsInput, this.soundInput, this.autoResInput, this.fpsCapInput, this.othersFxInput, this.musicInput]) {
       input.addEventListener('input', emit);
     }
 
@@ -257,6 +259,7 @@ export class Menu {
       el('div', { class: 'menu-row' }, [el('span', { text: '발차기 키' }), this._keyButton('kick')]),
       this.keyMsg,
       el('label', { class: 'menu-row' }, [el('span', { text: '효과음' }), this.soundInput]),
+      el('label', { class: 'menu-row' }, [el('span', { text: '타워 배경음악' }), this.musicInput]),
       el('label', { class: 'menu-row' }, [el('span', { text: 'FPS 표시' }), this.fpsInput]),
       el('button', { class: 'menu-btn', attrs: { type: 'button' }, text: '← 돌아가기', on: { click: () => this._show('main') } }),
     ]);
@@ -315,6 +318,7 @@ export class Menu {
     this.autoResInput.checked = s.autoRes !== false;
     this.fpsCapInput.checked = s.fpsCap ?? !!this.h.isMobile;
     this.othersFxInput.checked = s.othersFx !== false;
+    this.musicInput.checked = s.music !== false;
     this.keys = { ...DEFAULT_SETTINGS.keys, ...(s.keys || {}) };
     this._syncKeys();
     this.quality = s.quality;

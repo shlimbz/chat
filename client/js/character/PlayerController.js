@@ -3,6 +3,7 @@
 // + 공격(주먹/발차기) 쿨다운 + 맞았을 때 넉백·기절
 import { CONFIG } from '../config.js';
 import { actionToIndex, ATTACKS } from '../shared/protocol.js';
+import { BODY_HEIGHT } from '../world/CollisionWorld.js';
 
 export class PlayerController {
   /**
@@ -130,6 +131,7 @@ export class PlayerController {
     const ground = this.collision.groundHeight(this.position.x, this.position.z, y);
     this.position.y = Math.max(y, ground);
     this.grounded = this.position.y <= ground + 0.001;
+    this._standBox = null;
     this._syncModel();
   }
 
@@ -195,6 +197,12 @@ export class PlayerController {
     this.knock.x *= kd;
     this.knock.z *= kd;
 
+    // 움직이는 발판 위에 서 있으면 발판과 함께 이동
+    const stand = this._standBox;
+    if (this.grounded && stand && !stand.off && (stand.dx || stand.dz)) {
+      this.position.x += stand.dx;
+      this.position.z += stand.dz;
+    }
     const prevX = this.position.x;
     const prevZ = this.position.z;
     this.position.x += (this.velocity.x + this.knock.x) * dt;
@@ -218,18 +226,33 @@ export class PlayerController {
       this.vy = CONFIG.JUMP_VELOCITY;
       this.grounded = false;
       this._jumpQueued = 0;
+      this.onJump?.();
     }
     if (this.grounded && this.position.y > ground + 0.02) this.grounded = false; // 가장자리에서 떨어짐
     if (this.grounded) {
       this.position.y = ground; // 낮은 턱(러닝머신 발판 등)은 걸어서 올라감
     } else {
       this.vy -= CONFIG.GRAVITY * dt;
-      this.position.y += this.vy * dt;
+      let ny = this.position.y + this.vy * dt;
+      // 머리 위 발판에 부딪히면 더 못 올라감
+      if (this.vy > 0) {
+        const ceil = this.collision.ceilingAbove(this.position.x, this.position.z, this.position.y, ny);
+        if (ceil < Infinity) { ny = Math.min(ny, ceil - BODY_HEIGHT); this.vy = 0; }
+      }
+      this.position.y = ny;
       if (this.position.y <= ground) {
         this.position.y = ground;
         this.vy = 0;
         this.grounded = true;
       }
+    }
+    this._standBox = this.grounded ? this.collision.groundBox : null;
+    // 점프대: 밟는 순간 높이 튀어 오름
+    if (this.grounded && this._standBox?.pad && !down) {
+      this.vy = this._standBox.pad;
+      this.grounded = false;
+      this._standBox = null;
+      this.onPad?.();
     }
 
     // 이동 방향으로 회전 (맞아서 밀려날 때는 그대로)

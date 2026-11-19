@@ -59,12 +59,13 @@ export const DEFAULT_SETTINGS = Object.freeze({
   autoRes: true, // 프레임이 낮으면 해상도 자동 조절
   fpsCap: null, // 30fps 제한 (null = 모바일이면 켬)
   othersFx: true, // 다른 사람 트레일·오라 표시
+  music: true, // 득근 타워 배경음악
   keys: Object.freeze({ punch: 'KeyJ', kick: 'KeyK' }), // 공격 키 (설정에서 변경)
 });
 
 // 공격 키로 쓸 수 없는 키 (이동·점프·채팅·메뉴 등)
 export const RESERVED_KEYS = new Set(['KeyW', 'KeyA', 'KeyS', 'KeyD', 'KeyE', 'Space', 'Enter', 'NumpadEnter', 'Escape', 'Slash',
-  'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'ShiftLeft', 'ShiftRight', 'Tab', 'MetaLeft', 'MetaRight', 'KeyI']);
+  'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'ShiftLeft', 'ShiftRight', 'Tab', 'MetaLeft', 'MetaRight', 'KeyI', 'KeyR']);
 
 export function loadSettings() {
   const data = read(CONFIG.STORAGE_KEY_SETTINGS) || {};
@@ -78,6 +79,7 @@ export function loadSettings() {
   if (typeof data.autoRes === 'boolean') s.autoRes = data.autoRes;
   if (typeof data.fpsCap === 'boolean') s.fpsCap = data.fpsCap;
   if (typeof data.othersFx === 'boolean') s.othersFx = data.othersFx;
+  if (typeof data.music === 'boolean') s.music = data.music;
   const k = data.keys && typeof data.keys === 'object' ? data.keys : {};
   const ok = (c) => typeof c === 'string' && /^[A-Za-z0-9]{2,20}$/.test(c) && !RESERVED_KEYS.has(c);
   s.keys = {

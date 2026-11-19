@@ -68,6 +68,20 @@ export class HUD {
     this.toastEl = el('div', { class: 'hud-toast hidden' });
     this.root.append(this.toastEl);
 
+    // 득근 타워: 위쪽 가운데 진행 표시 + 버튼 (체크포인트로 / 헬스장으로)
+    this.towerStage = el('div', { class: 'tw-stage' });
+    this.towerTime = el('div', { class: 'tw-time', text: '0:00.0' });
+    this.towerBest = el('div', { class: 'tw-best' });
+    this.towerCpBtn = el('button', { class: 'tw-btn', attrs: { type: 'button', title: '마지막 체크포인트로 (R)' }, html: '↺ <span>체크포인트</span><kbd>R</kbd>' });
+    this.towerExitBtn = el('button', { class: 'tw-btn', attrs: { type: 'button', title: '헬스장으로 돌아가기' }, html: '🏋️ <span>헬스장</span>' });
+    this.towerCpBtn.addEventListener('click', () => this.onTowerRespawn?.());
+    this.towerExitBtn.addEventListener('click', () => this.onTowerExit?.());
+    this.towerEl = el('div', { class: 'hud-tower hidden' }, [
+      el('div', { class: 'tw-info' }, [this.towerStage, this.towerTime, this.towerBest]),
+      el('div', { class: 'tw-btns' }, [this.towerCpBtn, this.towerExitBtn]),
+    ]);
+    this.root.append(this.towerEl);
+
     root.append(this.root);
     this._lastState = '';
     this._lastZone = '';
@@ -146,6 +160,30 @@ export class HUD {
     p.style.color = color;
     this.root.append(p);
     setTimeout(() => p.remove(), 900);
+  }
+
+  /** 타워 진행 표시 (null 이면 숨김) */
+  setTower(info) {
+    this.towerEl.classList.toggle('hidden', !info);
+    document.body.classList.toggle('in-tower', !!info);
+    if (!info) return;
+    const t = info.done ? `🏆 정상 도착!` : `STAGE ${Math.min(info.stage + 1, info.total)}/${info.total} · ${info.name}`;
+    if (this.towerStage.textContent !== t) this.towerStage.textContent = t;
+    const b = info.best ? `최고 ${info.best}` : '';
+    if (this.towerBest.textContent !== b) this.towerBest.textContent = b;
+  }
+
+  setTowerTime(text, done = false) {
+    if (this.towerTime.textContent !== text) this.towerTime.textContent = text;
+    this.towerTime.classList.toggle('done', done);
+  }
+
+  /** 화면 전체가 잠깐 번쩍 (함정에 닿음 / 포탈) */
+  flash(color = 'rgba(255,60,90,0.45)') {
+    const f = el('div', { class: 'hud-flash' });
+    f.style.background = color;
+    this.root.append(f);
+    setTimeout(() => f.remove(), 450);
   }
 
   /** 코인 표시 (null 이면 숨김 = 오프라인) */

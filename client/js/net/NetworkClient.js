@@ -62,7 +62,7 @@ export class NetworkClient {
       this.socket = socket;
 
       // 서버 이벤트를 등록된 핸들러로 전달
-      for (const ev of [EV.PLAYER_JOIN, EV.PLAYER_LEAVE, EV.PLAYER_APPEARANCE, EV.STATE, EV.CORRECT, EV.CHAT, EV.ATTACK_FX, EV.HIT, EV.WALLET, EV.RANKING_LIVE, EV.BAG_RESULT]) {
+      for (const ev of [EV.PLAYER_JOIN, EV.PLAYER_LEAVE, EV.PLAYER_APPEARANCE, EV.STATE, EV.CORRECT, EV.CHAT, EV.ATTACK_FX, EV.HIT, EV.WALLET, EV.RANKING_LIVE, EV.BAG_RESULT, EV.TOWER_STATE]) {
         socket.on(ev, (data) => this._emitLocal(ev, data));
       }
 
@@ -147,6 +147,16 @@ export class NetworkClient {
 
   sell(itemId) {
     return this.request(EV.SHOP_SELL, itemId);
+  }
+
+  /** 맵 이동 (포탈) → 서버가 위치를 확인하고 옮겨 줌 */
+  travel(to) {
+    return this.request(EV.MAP_TRAVEL, { to });
+  }
+
+  /** 타워: 마지막 체크포인트로 (restart=true 면 처음부터) */
+  towerRespawn(restart = false) {
+    return this.request(EV.TOWER_RESPAWN, { restart });
   }
 
   setAppearance(appearance) {

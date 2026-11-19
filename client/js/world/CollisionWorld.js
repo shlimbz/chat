@@ -4,6 +4,8 @@
 // - groundHeight(): 발밑에서 가장 높은 윗면 → 상자 위에 올라설 수 있음
 // Three.js 에 의존하지 않는 순수 모듈
 export const STEP_HEIGHT = 0.25;
+/** 캐릭터 키 (공중에 떠 있는 발판 아래로 지나갈 수 있는지 판단) */
+export const BODY_HEIGHT = 1.6;
 
 export class CollisionWorld {
   /**
@@ -14,11 +16,16 @@ export class CollisionWorld {
     this.boxes = [];
   }
 
-  /** top 을 생략하면 무한히 높은 벽 */
-  addBox(minX, maxX, minZ, maxZ, tag = '', top = Infinity) {
-    this.boxes.push({
-      minX: Math.min(minX, maxX), maxX: Math.max(minX, maxX), minZ: Math.min(minZ, maxZ), maxZ: Math.max(minZ, maxZ), top, tag,
-    });
+  /**
+   * top 을 생략하면 무한히 높은 벽. bottom 을 주면 공중에 떠 있는 발판 (아래로 지나갈 수 있음)
+   * 반환한 상자를 직접 바꿔 움직이는 발판을 만들 수 있음 (off=true 면 잠시 없는 것으로 처리)
+   */
+  addBox(minX, maxX, minZ, maxZ, tag = '', top = Infinity, bottom = -Infinity) {
+    const b = {
+      minX: Math.min(minX, maxX), maxX: Math.max(minX, maxX), minZ: Math.min(minZ, maxZ), maxZ: Math.max(minZ, maxZ), top, bottom, tag, off: false,
+    };
+    this.boxes.push(b);
+    return b;
   }
 
   /**
@@ -51,10 +58,11 @@ export class CollisionWorld {
    */
   resolveCircle(pos, r, feetY = 0) {
     const clearY = feetY + STEP_HEIGHT;
+    const headY = feetY + BODY_HEIGHT;
     for (let iter = 0; iter < 3; iter++) {
       let moved = false;
       for (const b of this.boxes) {
-        if (b.top <= clearY) continue;
+        if (b.off || b.top <= clearY || b.bottom >= headY) continue;
         const cx = Math.min(Math.max(pos.x, b.minX), b.maxX);
         const cz = Math.min(Math.max(pos.z, b.minZ), b.maxZ);
         const dx = pos.x - cx;
@@ -92,21 +100,36 @@ export class CollisionWorld {
    * @param {number} r 발 판정 반지름 (몸보다 작게 → 모서리에 살짝 걸쳐서는 올라서지 않음)
    */
   groundHeight(x, z, feetY, r = 0.2) {
-    let ground = 0;
+    let ground = this.floor ?? 0;
+    let box = null;
     const limit = feetY + STEP_HEIGHT;
     for (const b of this.boxes) {
-      if (b.top === Infinity || b.top > limit || b.top <= ground) continue;
+      if (b.off || b.top === Infinity || b.top > limit || b.top <= ground) continue;
       if (x + r < b.minX || x - r > b.maxX || z + r < b.minZ || z - r > b.maxZ) continue;
       ground = b.top;
+      box = b;
     }
+    this.groundBox = box; // 지금 밟고 있는 상자 (움직이는 발판에 태우기 / 점프대)
     return ground;
+  }
+
+  /** 머리 위 천장: 발이 fromY → toY 로 올라갈 때 머리가 부딪히는 가장 낮은 발판 밑면 (없으면 Infinity) */
+  ceilingAbove(x, z, fromY, toY, r = 0.25) {
+    let ceil = Infinity;
+    for (const b of this.boxes) {
+      if (b.off || b.bottom === -Infinity) continue;
+      if (b.bottom < fromY + BODY_HEIGHT - 0.01 || b.bottom > toY + BODY_HEIGHT || b.bottom >= ceil) continue;
+      if (x + r < b.minX || x - r > b.maxX || z + r < b.minZ || z - r > b.maxZ) continue;
+      ceil = b.bottom;
+    }
+    return ceil;
   }
 
   /** 원이 장애물과 겹치는지 여부 (스폰 위치 검사 등) */
   overlaps(pos, r, feetY = 0) {
     const clearY = feetY + STEP_HEIGHT;
     for (const b of this.boxes) {
-      if (b.top <= clearY) continue;
+      if (b.off || b.top <= clearY || b.bottom >= feetY + BODY_HEIGHT) continue;
       const cx = Math.min(Math.max(pos.x, b.minX), b.maxX);
       const cz = Math.min(Math.max(pos.z, b.minZ), b.maxZ);
       const dx = pos.x - cx;

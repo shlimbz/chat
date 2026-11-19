@@ -13,6 +13,9 @@ import {
   createSignboard, m,
 } from './equipment.js';
 import { EQUIPMENT_TYPES } from '../shared/equipmentTypes.js';
+import { GYM_PORTAL } from '../shared/towerLayout.js';
+import { createPortal } from './portal.js';
+import { Npc } from './Npc.js';
 import {
   createReceptionDesk, createPlateTree, createKettlebellRow, createStretchZone, createPunchingBag, createLockers,
   createTowelShelf, createWallClock, createSpeaker, createFloorTrack, createPoster,
@@ -21,6 +24,8 @@ import {
 
 export const GYM_SIZE = { width: 40, depth: 30, height: 5 };
 export const SPAWN_POINT = { x: 0, z: 12, rotY: Math.PI }; // 입구 안쪽에서 헬스장 중앙을 바라봄
+/** 안내 코치 NPC (입구 오른쪽, 처음 들어온 사람 쪽을 바라봄) */
+export const COACH_NPC = { x: 3.2, z: 10.3, r: Math.atan2(-3.2, 1.7) };
 
 // 운동기구 배치표 — 기구를 추가/이동할 때는 이 표만 수정하면 됩니다.
 // id 는 Phase 2 이후 서버와 "누가 어떤 기구를 사용 중인지" 동기화할 때 사용합니다.
@@ -46,6 +51,8 @@ export class Gym {
     this.collision = new CollisionWorld({ minX: -W, maxX: W, minZ: -D, maxZ: D });
     /** @type {Array<{id:string,type:string,label:string,x:number,z:number,rotY:number,object:THREE.Object3D,parts:object}>} */
     this.interactables = [];
+    this.npcs = [];
+    this.portals = [];
 
     this._buildLights();
     this._buildRoom();
@@ -85,7 +92,7 @@ export class Gym {
   }
 
   /** 플레이어 위치에서 가장 가까운 상호작용 가능한 기구 */
-  findNearestInteractable(x, z, range) {
+  findNearestInteractable(x, z, range, y = 0) { // eslint-disable-line no-unused-vars
     let best = null;
     let bestD = range * range;
     for (const it of this.interactables) {
@@ -95,6 +102,14 @@ export class Gym {
       if (d2 < bestD) { bestD = d2; best = it; }
     }
     return best;
+  }
+
+  /** 걸어 들어가면 바로 이동하는 포탈 (고리 가운데 근처) */
+  portalAt(x, y, z) {
+    for (const p of this.portals) {
+      if (Math.abs(y - p.y) < 1.2 && Math.hypot(x - p.x, z - p.z) < 0.75) return p;
+    }
+    return null;
   }
 
   // ── 내부 ───────────────────────────────────────────────
@@ -256,17 +271,33 @@ export class Gym {
     this.root.add(mesh);
   }
 
-  /** 천장에 매달린 양면 랭킹 전광판 (캔버스에 그려서 갱신될 때만 다시 그림 → 비용 거의 없음) */
+  /**
+   * 천장에 매달린 양면 랭킹 전광판
+   * - 글씨는 고해상도(2048px) 캔버스에 그리고 비스듬히 봐도 뭉개지지 않게 이방성 필터를 씀
+   * - 내 캐릭터를 가리거나 바로 밑을 지나갈 때는 반투명해짐 (updateBoardFade)
+   */
   _buildRankingBoard() {
     const B = RANK_BOARD;
     const canvas = document.createElement('canvas');
-    canvas.width = 1024;
-    canvas.height = 472;
+    this.rankScale = 2;
+    canvas.width = 1024 * this.rankScale;
+    canvas.height = 472 * this.rankScale;
     this.rankCanvas = canvas;
     this.rankTex = new THREE.CanvasTexture(canvas);
     this.rankTex.colorSpace = THREE.SRGBColorSpace;
-    this._place(createHangingBoard(B.w, B.h, B.y, GYM_SIZE.height), B.x, B.z, 0, '');
-    const mat = new THREE.MeshBasicMaterial({ map: this.rankTex });
+    this.rankTex.anisotropy = 8; // Game 이 기기 최대값으로 다시 맞춤
+    const frame = createHangingBoard(B.w, B.h, B.y, GYM_SIZE.height);
+    frame.group.userData.noBatch = true; // 반투명 처리를 위해 병합하지 않음 (메시 4개)
+    this._place(frame, B.x, B.z, 0, '');
+    this.boardMats = [];
+    frame.group.traverse((o) => {
+      if (!o.isMesh) return;
+      o.material = o.material.clone();
+      o.material.transparent = true;
+      this.boardMats.push(o.material);
+    });
+    const mat = new THREE.MeshBasicMaterial({ map: this.rankTex, transparent: true });
+    this.boardMats.push(mat);
     for (const side of [1, -1]) {
       const board = new THREE.Mesh(new THREE.PlaneGeometry(B.w, B.h), mat);
       board.position.set(B.x, B.y, B.z + side * 0.085);
@@ -274,7 +305,52 @@ export class Gym {
       board.userData.noBatch = true;
       this.root.add(board);
     }
+    this.boardOpacity = 1;
     this.setRankingBoard(null);
+  }
+
+  /** 기기가 지원하는 최대 이방성 필터 (비스듬히 볼 때 글씨 선명도) */
+  setMaxAnisotropy(n) {
+    if (!this.rankTex || !n) return;
+    this.rankTex.anisotropy = Math.min(16, n);
+    this.rankTex.needsUpdate = true;
+  }
+
+  /**
+   * 전광판이 시야를 가리면 반투명하게
+   * @param {THREE.Vector3} cam 카메라 위치
+   * @param {{x:number,y:number,z:number}} p 내 캐릭터 발 위치
+   */
+  updateBoardFade(dt, cam, p) {
+    if (!this.boardMats) return;
+    const B = RANK_BOARD;
+    const pad = 0.35;
+    const bottom = B.y - B.h / 2 - 0.25;
+    const top = B.y + B.h / 2 + 0.2;
+    let block = false;
+    // 1) 카메라 → 내 캐릭터(가슴 높이) 선이 전광판 면을 지나감
+    const hy = p.y + 1.1;
+    const dz = p.z - cam.z;
+    if (Math.abs(dz) > 1e-4) {
+      const t = (B.z - cam.z) / dz;
+      if (t > 0 && t < 1) {
+        const x = cam.x + (p.x - cam.x) * t;
+        const y = cam.y + (hy - cam.y) * t;
+        if (Math.abs(x - B.x) < B.w / 2 + pad && y > bottom && y < top) block = true;
+      }
+    }
+    // 2) 바로 밑이나 옆을 지나가는 중 (카메라가 전광판 높이에 가까움)
+    if (!block && Math.abs(p.x - B.x) < B.w / 2 + 1.2 && Math.abs(p.z - B.z) < 2.6) block = true;
+    // 3) 카메라가 전광판 바로 앞에 붙어 있음
+    if (!block && Math.abs(cam.x - B.x) < B.w / 2 + 0.6 && Math.abs(cam.z - B.z) < 1.4 && cam.y > bottom - 0.6) block = true;
+    const target = block ? 0.22 : 1;
+    if (this.boardOpacity === target) return; // 바뀔 때만 재질 수정
+    const o = this.boardOpacity + (target - this.boardOpacity) * Math.min(1, dt * 8);
+    this.boardOpacity = Math.abs(o - target) < 0.01 ? target : o;
+    for (const mt of this.boardMats) {
+      mt.opacity = this.boardOpacity;
+      mt.depthWrite = this.boardOpacity > 0.99; // 반투명일 때는 뒤의 캐릭터가 가려지지 않게
+    }
   }
 
   /** @param {{day:string, exercise:object[], bag:object[]}|null} data */
@@ -282,27 +358,30 @@ export class Gym {
     const c = this.rankCanvas;
     if (!c) return;
     const g = c.getContext('2d');
+    const S = this.rankScale || 1;
+    g.setTransform(S, 0, 0, S, 0, 0); // 아래 좌표는 1024×472 기준
+    const font = (px) => `bold ${px}px "Apple SD Gothic Neo", "Malgun Gothic", "Noto Sans KR", sans-serif`;
     g.fillStyle = '#16202c';
-    g.fillRect(0, 0, c.width, c.height);
+    g.fillRect(0, 0, 1024, 472);
     g.fillStyle = '#ffd84a';
-    g.font = 'bold 50px "Apple SD Gothic Neo", "Malgun Gothic", sans-serif';
+    g.font = font(52);
     g.textAlign = 'center';
     g.textBaseline = 'middle';
-    g.fillText('🏆 오늘의 랭킹 (실시간)', c.width / 2, 44);
+    g.fillText('🏆 오늘의 랭킹 (실시간)', 512, 46);
     const col = (title, rows, fmt, cx) => {
       g.fillStyle = '#7fe3d4';
-      g.font = 'bold 36px "Apple SD Gothic Neo", "Malgun Gothic", sans-serif';
+      g.font = font(38);
       g.textAlign = 'center';
       g.fillText(title, cx, 112);
-      g.font = 'bold 34px "Apple SD Gothic Neo", "Malgun Gothic", sans-serif';
+      g.font = font(36);
       if (!rows || !rows.length) {
-        g.fillStyle = '#8a96a3';
+        g.fillStyle = '#9aa6b3';
         g.fillText(data ? '아직 기록 없음' : '서버 연결 시 표시', cx, 200);
         return;
       }
       rows.slice(0, 5).forEach((r, i) => {
-        const yy = 172 + i * 60;
-        g.fillStyle = i === 0 ? '#ffd84a' : i === 1 ? '#d9dee5' : i === 2 ? '#e3a36b' : '#ffffff';
+        const yy = 174 + i * 60;
+        g.fillStyle = i === 0 ? '#ffd84a' : i === 1 ? '#e3e8ee' : i === 2 ? '#f0b07a' : '#ffffff';
         g.textAlign = 'left';
         g.fillText(`${i + 1}. ${String(r.nickname).slice(0, 8)}`, cx - 215, yy);
         g.textAlign = 'right';
@@ -310,14 +389,15 @@ export class Gym {
       });
     };
     const fmtS = (s) => (s >= 3600 ? `${Math.floor(s / 3600)}h ${Math.floor((s % 3600) / 60)}m` : `${Math.floor(s / 60)}m ${s % 60}s`);
-    col('💪 운동 시간', data?.exercise, fmtS, c.width * 0.27);
-    col('🥊 샌드백 PERFECT', data?.bag, (v) => `${v}회`, c.width * 0.73);
+    col('💪 운동 시간', data?.exercise, fmtS, 1024 * 0.27);
+    col('🥊 샌드백 PERFECT', data?.bag, (v) => `${v}회`, 1024 * 0.73);
     g.strokeStyle = '#2f3d4d';
     g.lineWidth = 3;
     g.beginPath();
-    g.moveTo(c.width / 2, 90);
-    g.lineTo(c.width / 2, c.height - 20);
+    g.moveTo(512, 90);
+    g.lineTo(512, 452);
     g.stroke();
+    g.setTransform(1, 0, 0, 1, 0, 0);
     this.rankTex.needsUpdate = true;
   }
 
@@ -515,7 +595,9 @@ export class Gym {
    * @param {number} dt
    * @param {number} serverMs 서버 시각 (모든 화면에서 샌드백이 같은 위치에 있도록)
    */
-  update(dt, serverMs = performance.now()) {
+  update(dt, serverMs = performance.now(), viewer = null) {
+    for (const p of this.portals) p.visual.update(dt);
+    for (const n of this.npcs) n.update(dt, viewer);
     for (const bag of this.punchingBags || []) {
       const inZone = bagInZone(bag.idx, serverMs);
       if (inZone !== bag.lit) {
@@ -559,6 +641,24 @@ export class Gym {
     this._addInteractable({
       id: 'rankboard', type: 'rankboard', x: RANK_BOARD.x, z: RANK_BOARD.z, rotY: 0, interactPoint: { x: 0, z: 0 },
     });
+    // 북동쪽 구석: 득근 타워(점프맵)로 가는 포탈 — 걸어 들어가거나 E
+    const portal = createPortal({ color: '#8e6bd8', label: '🗼 득근 타워' });
+    portal.group.position.set(GYM_PORTAL.x, 0, GYM_PORTAL.z);
+    portal.group.rotation.y = GYM_PORTAL.rotY;
+    this.root.add(portal.group);
+    this.portals.push({ visual: portal, x: GYM_PORTAL.x, y: 0, z: GYM_PORTAL.z });
+    this.interactables.push({
+      id: 'gym-portal', type: 'portal', to: 'tower', label: '득근 타워', x: GYM_PORTAL.x, z: GYM_PORTAL.z, y: 0,
+    });
+    // 안내 코치 NPC (입구 오른쪽) — E 로 말 걸면 조작법 안내
+    const coach = new Npc(this.root, {
+      id: 'npc-coach', name: '안내 코치 득근', look: 'coach', x: COACH_NPC.x, z: COACH_NPC.z, r: COACH_NPC.r, greet: '어서 와요! E 를 누르면 조작법 알려줄게요', greetMobile: '어서 와요! [말 걸기] 누르면 조작법 알려줄게요',
+    });
+    this.npcs.push(coach);
+    this.collision.addBox(COACH_NPC.x - 0.3, COACH_NPC.x + 0.3, COACH_NPC.z - 0.3, COACH_NPC.z + 0.3, 'npc', 1.8);
+    this.interactables.push({
+      id: 'npc-coach', type: 'npc', npc: 'coach', label: coach.name, x: COACH_NPC.x, z: COACH_NPC.z, y: 0,
+    });
     // 입구 쪽 대기 벤치 (앞/뒤 양쪽으로 앉기)
     this._placeBench(2.6, -11, 13.2, 0, 'rest-bench-1');
     this._placeBench(2.6, -7.6, 13.2, 0, 'rest-bench-2');
@@ -569,7 +669,7 @@ export class Gym {
 
     // 화분으로 벽면의 빈 공간을 정리하고, 출입구와 운동 동선은 비워 둡니다.
     for (const [x, z] of [
-      [-W + 1.0, D - 1.0], [W - 1.0, -D + 1.0],
+      [-W + 1.0, D - 1.0], // 북동쪽 구석(W-1, -D+1)은 타워 포탈 자리
       [-5.5, -D + 1.0], [5.5, -D + 1.0], [-7.5, D - 1.0], [7.5, D - 1.0],
     ]) this._place(createPlant(), x, z, 0, 'plant');
 

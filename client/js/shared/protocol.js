@@ -1,7 +1,7 @@
 // 클라이언트 ↔ 서버 통신 규약 (양쪽이 같은 파일을 import)
 // 이벤트 이름과 값의 범위를 한곳에서 관리합니다.
 
-export const PROTOCOL_VERSION = 7;
+export const PROTOCOL_VERSION = 8;
 
 export const EV = {
   // 서버 → 클라이언트
@@ -31,6 +31,10 @@ export const EV = {
   BAG_RESULT: 'bag:result', // 서버 → 친 사람: { bag, perfect, coins }
   RANKING_LIVE: 'ranking:live', // 서버 → 전체: { day, exercise, bag } (바뀌었을 때만, 최대 5초마다)
   RANKING: 'ranking', // → ack({ day, exercise:[{id,nickname,value}], bag:[...], me:{id, exercise, bag} })
+  // 득근 타워 (맵 이동)
+  MAP_TRAVEL: 'map:travel', // { to:'tower'|'gym' } → ack({ ok, message?, map, x, y, z, r })  포탈 근처에서만 (서버 확인)
+  TOWER_RESPAWN: 'tower:respawn', // { restart } → ack({ ok, x, y, z, r, cp })  서버가 기억한 체크포인트로 이동
+  TOWER_STATE: 'tower:state', // 서버 → 본인: { cp, startedAt, clearMs?, coins? }  체크포인트 통과 / 클리어
 };
 
 // 접속 거부 사유 (connect_error 의 message)
