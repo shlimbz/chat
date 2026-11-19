@@ -50,9 +50,9 @@ export const actionToIndex = (a) => Math.max(0, ACTIONS.indexOf(a));
 export const indexToAction = (i) => ACTIONS[i] || 'idle';
 
 // 위치 검증용 수치 (서버)
-export const WORLD_BOUNDS = { minX: -16, maxX: 16, minZ: -12, maxZ: 12, maxY: 3.5 };
+export const WORLD_BOUNDS = { minX: -20, maxX: 20, minZ: -15, maxZ: 15, maxY: 3.5 };
 export const MAX_MOVE_SPEED = 6.0; // 클라이언트 RUN_SPEED 와 같아야 함
-export const SPAWN = { x: 0, y: 0, z: 8, r: Math.PI };
+export const SPAWN = { x: 0, y: 0, z: 12, r: Math.PI };
 
 // 네트워크 주기
 export const CLIENT_SEND_HZ = 12;

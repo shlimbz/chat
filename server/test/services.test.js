@@ -65,15 +65,15 @@ for (const [name, makeDb] of Object.entries(BACKENDS)) {
     const accounts = new AccountService(await makeDb(), { adminUsernames: ['ADMING'], reservedUsernames: ['ADMING'] });
     // 일반 가입으로는 관리자 아이디를 먼저 차지할 수 없음
     assert.equal((await accounts.register('adming', 'hacker123')).ok, false);
-    assert.equal((await accounts.ensureAdmin('ADMING', 'dlrjamld')).created, true);
-    const l = await accounts.login('ADMING', 'dlrjamld');
+    assert.equal((await accounts.ensureAdmin('ADMING', 'adminpass1')).created, true);
+    const l = await accounts.login('ADMING', 'adminpass1');
     assert.equal(l.ok, true);
     assert.equal(l.account.isAdmin, true);
     assert.equal(l.account.coins, 0);
     assert.deepEqual(l.account.items, []);
     // 비밀번호를 바꾸면 재시작 시 새 비밀번호로 맞춰짐
     assert.equal((await accounts.ensureAdmin('ADMING', 'newpass99')).created, false);
-    assert.equal((await accounts.login('ADMING', 'dlrjamld')).ok, false);
+    assert.equal((await accounts.login('ADMING', 'adminpass1')).ok, false);
     assert.equal((await accounts.login('ADMING', 'newpass99')).ok, true);
     assert.equal((await accounts.ensureAdmin('ADMING', '123')).ok, false); // 너무 짧은 비밀번호
     assert.equal(await accounts.cleanupSessions(), 0);
@@ -242,15 +242,15 @@ test('전투: 거리·방향·쿨다운 판정, 넉백, 연타 시 기절', () =
 test('이동 검증: 범위 제한, 순간이동 차단, 넉백 중 여유, 변경분만 전송', () => {
   const reg = new PlayerRegistry();
   const p = reg.add('s1', { id: 7, nickname: 'n', appearance: {}, bodyStats: {}, level: 1, lastPos: null }, 0);
-  assert.equal(p.z, 8);
-  assert.equal(reg.applyMove(p, [0.5, 0, 7.5, 0, 1], 100), 'ok');
-  assert.deepEqual(reg.takeStatePacket(), [[7, 0.5, 0, 7.5, 0, 1]]);
+  assert.equal(p.z, 12);
+  assert.equal(reg.applyMove(p, [0.5, 0, 11.5, 0, 1], 100), 'ok');
+  assert.deepEqual(reg.takeStatePacket(), [[7, 0.5, 0, 11.5, 0, 1]]);
   assert.deepEqual(reg.takeStatePacket(), []);
   assert.equal(reg.applyMove(p, [10, 0, -10, 0, 1], 200), 'corrected');
-  assert.equal(reg.applyMove(p, [0.5, 99, 7.5, 0, 3], 300), 'ok');
+  assert.equal(reg.applyMove(p, [0.5, 99, 11.5, 0, 3], 300), 'ok');
   assert.equal(p.y, 3.5);
   assert.equal(reg.applyMove(p, ['a', 0, 0, 0, 0], 400), 'invalid');
   // 넉백 중에는 더 빠른 이동 허용
   p.knockbackUntil = 1000;
-  assert.equal(reg.applyMove(p, [0.5, 0, 6.0, 0, 0], 500), 'ok');
+  assert.equal(reg.applyMove(p, [0.5, 0, 10.0, 0, 0], 500), 'ok');
 });

@@ -161,14 +161,23 @@ export class Game {
     if (!this.player.tryAttack(type)) return;
     this.sfx.swing();
     this.network?.sendAttack(type);
-    this._bagCheck(this.player.position, this.player.rotY);
+    this._bagCheck(this.player.position, this.player.rotY, type, true);
   }
 
-  /** 공격 방향 앞에 샌드백이 있으면 흔들기 */
-  _bagCheck(pos, rotY) {
-    const hx = pos.x + Math.sin(rotY) * 0.8;
-    const hz = pos.z + Math.cos(rotY) * 0.8;
-    this.gym.hitBag(hx, hz, pos.x, pos.z);
+  /** 정면에서 사정거리 안의 샌드백을 실제 타격합니다. */
+  _bagCheck(pos, rotY, type = 'punch', own = false) {
+    const reach = type === 'kick' ? 1.05 : 0.9;
+    const hx = pos.x + Math.sin(rotY) * reach;
+    const hz = pos.z + Math.cos(rotY) * reach;
+    const hit = this.gym.hitBag(hx, hz, pos.x, pos.z, rotY, type === 'kick' ? 1.45 : 1);
+    if (!hit) return;
+    this.effects.spawn(hit.x, hit.y, hit.z, type === 'kick');
+    // 다른 사람이 친 샌드백은 가까울 때만 소리를 내고, 안내 문구는 내가 처음 쳤을 때 한 번만
+    if (own || this._near(pos, 10)) this.sfx.hit(type === 'kick');
+    if (own && !this._bagHinted) {
+      this._bagHinted = true;
+      this.hud.toast('샌드백 명중! 주먹·발차기로 계속 쳐 보세요 🥊');
+    }
   }
 
   _bindAttackKeys() {
@@ -261,7 +270,7 @@ export class Game {
       if (!p) return;
       p.model.playAttack(type);
       if (this._near(p.pos, 10)) this.sfx.swing();
-      this._bagCheck(p.pos, p.rot);
+      this._bagCheck(p.pos, p.rot, type);
     });
     // 핑(왕복 지연) 측정 — 설정의 "FPS 표시"에 함께 표시
     clearInterval(this._pingTimer);
@@ -486,13 +495,14 @@ export class Game {
   }
 
   _zoneName(x, z) {
-    if (z > 7.2 && x > 7) return '휴식 공간';
-    if (z > 8.5 && Math.abs(x) < 3) return '입구';
-    if (z < -8 && Math.abs(x) < 4.5) return '덤벨 구역 · 거울';
-    if (x < -6 && z < -3) return '벤치프레스 구역';
-    if (x > 5.5 && z < -6) return '유산소 구역';
-    if (x < -6 && z > 1.5) return '머신 구역';
-    if (x > 10.5 && z > -5 && z < 5) return '랫풀다운 구역';
+    if (z > 4.5 && x > 8) return '휴식 공간';
+    if (z > 10.8 && Math.abs(x) < 7) return '입구';
+    if (x < -5 && z < -7) return '벤치프레스 구역';
+    if (x < -5 && z < 1) return '프리웨이트 구역';
+    if (x < -3 && z > 2) return '머신 구역';
+    if (x > 7 && z < -6) return '유산소 구역';
+    if (x > 14 && z > -5 && z < 7) return '랫풀다운 구역';
+    if (Math.abs(x) < 5 && z > -3 && z < 7) return '샌드백 · 스트레칭';
     return '헬스장 중앙';
   }
 

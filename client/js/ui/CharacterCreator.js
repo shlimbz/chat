@@ -2,7 +2,7 @@
 import { el } from './dom.js';
 import { getCharacterPreview } from './CharacterPreview.js';
 import {
-  GENDERS, BODY_PRESETS, BODY_SLIDERS, SKIN_COLORS, HAIR_STYLES, HAIR_COLORS, FACE_SHAPES, OUTFITS, CLOTH_COLORS, SHOES, SHOE_COLORS,
+  GENDERS, BODY_PRESETS, BODY_SLIDERS, SKIN_COLORS, HAIR_STYLES, HAIR_COLORS, FACE_SHAPES, EYE_STYLES, BROW_STYLES, NOSE_STYLES, MOUTH_STYLES, OUTFITS, CLOTH_COLORS, SHOES, SHOE_COLORS,
   DEFAULT_APPEARANCE, sanitizeAppearance, randomAppearance, validateNickname, NICKNAME_MAX,
 } from '../shared/appearance.js';
 
@@ -12,6 +12,10 @@ const SECTIONS = [
   { key: 'body', title: '체형 (빠른 선택 + 세부 조절)', kind: 'body' },
   { key: 'skin', title: '피부색', kind: 'colors', options: SKIN_COLORS },
   { key: 'face', title: '얼굴 형태', kind: 'chips', options: FACE_SHAPES },
+  { key: 'eyes', title: '눈 모양', kind: 'chips', options: EYE_STYLES },
+  { key: 'brows', title: '눈썹', kind: 'chips', options: BROW_STYLES },
+  { key: 'nose', title: '코 모양', kind: 'chips', options: NOSE_STYLES },
+  { key: 'mouth', title: '입 모양', kind: 'chips', options: MOUTH_STYLES },
   { key: 'hair', title: '헤어스타일', kind: 'chips', options: HAIR_STYLES },
   { key: 'hairColor', title: '헤어 컬러', kind: 'colors', options: HAIR_COLORS },
   { key: 'outfit', title: '의상', kind: 'chips', options: OUTFITS },

@@ -69,13 +69,13 @@ html, body {
 /* ── 공통 버튼 ─────────────────────── */
 .btn {
   font: inherit; font-weight: 700;
-  border: 2px solid var(--ink); background: #fff; color: var(--ink);
+  border: 1px solid #cbd3dc; background: #fff; color: #344253;
   border-radius: 12px; padding: 10px 16px; cursor: pointer;
-  box-shadow: 0 3px 0 var(--ink);
+  box-shadow: 0 3px 10px rgba(28, 42, 58, .08);
   transition: transform .06s, box-shadow .06s;
 }
-.btn:active { transform: translateY(2px); box-shadow: 0 1px 0 var(--ink); }
-.btn-primary { background: var(--yellow); flex: 1; }
+.btn:active { transform: translateY(1px); box-shadow: 0 1px 5px rgba(28, 42, 58, .08); }
+.btn-primary { background: #e9c36f; border-color: #d6ad55; color: #28323e; flex: 1; }
 
 /* ── 오버레이 ─────────────────────── */
 .overlay {
@@ -85,16 +85,16 @@ html, body {
 .overlay.dim { background: rgba(20, 22, 28, 0.45); }
 
 /* ── 캐릭터 생성 ─────────────────── */
-#creator { background: linear-gradient(160deg, #f3eee6 0%, #e4ecf4 100%); }
+#creator { background: radial-gradient(circle at 78% 18%, rgba(255,255,255,.84), transparent 34%), linear-gradient(145deg, #dfe7ee 0%, #edf1f4 52%, #e7e2d9 100%); }
 .creator-wrap {
   display: flex; gap: 22px;
   width: min(1100px, 96vw); height: min(720px, 94vh);
 }
 .creator-panel {
   width: 430px; flex-shrink: 0;
-  background: var(--panel);
-  border: 3px solid var(--ink); border-radius: 20px;
-  box-shadow: 0 6px 0 var(--ink);
+  background: rgba(255, 255, 255, 0.94);
+  border: 1px solid rgba(67, 80, 96, 0.16); border-radius: 22px;
+  box-shadow: 0 20px 55px rgba(35, 48, 63, 0.16);
   padding: 20px 22px;
   display: flex; flex-direction: column; gap: 10px; min-height: 0;
 }
@@ -104,7 +104,7 @@ html, body {
 .creator-label { font-size: 13px; font-weight: 800; color: var(--ink-soft); }
 .creator-nick {
   font: inherit; font-size: 17px; font-weight: 700;
-  padding: 10px 12px; border: 2px solid var(--ink); border-radius: 12px; outline: none;
+  padding: 10px 12px; border: 1px solid #cbd3dc; border-radius: 12px; outline: none; background: #fbfcfd;
   user-select: text;
 }
 .creator-nick:focus { box-shadow: 0 0 0 3px rgba(246, 213, 92, 0.8); }
@@ -113,11 +113,11 @@ html, body {
 .chips { display: flex; flex-wrap: wrap; gap: 6px; }
 .chip {
   font: inherit; font-size: 13px; font-weight: 700;
-  border: 2px solid #c9c4ba; background: #fff; color: var(--ink);
-  border-radius: 999px; padding: 6px 12px; cursor: pointer;
+  border: 1px solid #d2d9e1; background: #f9fbfc; color: #3b4654;
+  border-radius: 999px; padding: 7px 13px; cursor: pointer; transition: background .15s, border-color .15s, color .15s;
 }
-.chip:hover { border-color: var(--ink); }
-.chip.selected { background: var(--ink); color: #fff; border-color: var(--ink); }
+.chip:hover { border-color: #6e8298; background: #eef3f7; }
+.chip.selected { background: #344557; color: #fff; border-color: #344557; }
 .swatches { display: flex; flex-wrap: wrap; gap: 7px; }
 .swatch {
   width: 30px; height: 30px; border-radius: 50%;
@@ -127,8 +127,8 @@ html, body {
 .creator-actions { display: flex; gap: 8px; padding-top: 6px; }
 .creator-preview {
   flex: 1; position: relative; min-width: 0;
-  background: radial-gradient(circle at 50% 60%, #ffffff 0%, #e9eef5 70%);
-  border: 3px solid var(--ink); border-radius: 20px; box-shadow: 0 6px 0 var(--ink);
+  background: radial-gradient(circle at 50% 48%, #ffffff 0%, #e8eef4 72%, #dbe4ec 100%);
+  border: 1px solid rgba(67, 80, 96, 0.16); border-radius: 22px; box-shadow: 0 20px 55px rgba(35, 48, 63, 0.16);
   overflow: hidden;
 }
 .preview-wrap { position: absolute; inset: 0; }

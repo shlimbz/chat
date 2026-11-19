@@ -7,7 +7,9 @@ import {
   sanitizeBodyStats,
 } from '../client/js/shared/appearance.js';
 import { CollisionWorld } from '../client/js/world/CollisionWorld.js';
-import { lerpAngle } from '../client/js/character/PlayerController.js';
+import { PlayerController, lerpAngle } from '../client/js/character/PlayerController.js';
+import { findPunchingBagTarget } from '../client/js/world/bagCollision.js';
+import { buildShell, facePlacement, insideHead } from '../client/js/character/headShape.js';
 
 test('닉네임 검증', () => {
   assert.equal(validateNickname('헬린이').ok, true);
@@ -45,6 +47,19 @@ test('외형: 예전 체형 데이터 호환, 악세사리는 보유한 것만',
   assert.deepEqual(sanitizeAppearance({ acc }, { ownedItems: ['cap', 'sunglasses'] }).acc, { hat: 'cap', eyes: 'sunglasses' }); // 슬롯 불일치 제거
 });
 
+test('얼굴 파츠는 각각 검증되고 예전 캐릭터는 기본 얼굴로 호환', () => {
+  const a = sanitizeAppearance({ eyes: 'sparkle', brows: 'angled', nose: 'dot', mouth: 'cat' });
+  assert.equal(a.eyes, 'sparkle');
+  assert.equal(a.brows, 'angled');
+  assert.equal(a.nose, 'dot');
+  assert.equal(a.mouth, 'cat');
+  const old = sanitizeAppearance({ hair: 'short', face: 'round' });
+  assert.equal(old.eyes, DEFAULT_APPEARANCE.eyes);
+  assert.equal(old.brows, DEFAULT_APPEARANCE.brows);
+  assert.equal(old.nose, DEFAULT_APPEARANCE.nose);
+  assert.equal(old.mouth, DEFAULT_APPEARANCE.mouth);
+});
+
 test('랜덤 외형은 항상 유효', () => {
   for (let i = 0; i < 200; i++) {
     const a = randomAppearance();
@@ -59,6 +74,67 @@ test('성장 수치는 0~1 로 제한', () => {
   assert.equal(s.arms, 0);
   assert.equal(s.legs, 0);
   assert.equal(s.back, 0.5);
+});
+
+test('샌드백: 플레이어가 바라보는 방향의 정면 공격만 판정', () => {
+  const front = { worldX: 0, worldZ: 1.2 };
+  const bags = [front, { worldX: 2.4, worldZ: 1.2 }];
+  assert.equal(findPunchingBagTarget(bags, {
+    fromX: 0, fromZ: 0, hitX: 0, hitZ: 0.9, rotY: 0,
+  }), front);
+  assert.equal(findPunchingBagTarget([front], {
+    fromX: 0, fromZ: 0, hitX: 0, hitZ: 0.9, rotY: Math.PI,
+  }), null); // 뒤돌아선 상태
+  assert.equal(findPunchingBagTarget([front], {
+    fromX: 0, fromZ: 0, hitX: 0, hitZ: 0.9, rotY: Math.PI / 2,
+  }), null); // 옆을 보는 상태
+  assert.equal(findPunchingBagTarget([front], {
+    fromX: 0, fromZ: -1.5, hitX: 0, hitZ: -0.6, rotY: 0,
+  }), null); // 사정거리 밖
+});
+
+test('벤치 앉기: 다가온 쪽(앞/뒤)을 바라보고 앉고, 같은 쪽으로 일어남', () => {
+  const model = {
+    root: { position: { set() {} }, rotation: { y: 0 } },
+    setExercise() {},
+  };
+  const input = { onPress: () => () => {} };
+  const player = new PlayerController(model, input, {}, {});
+  const seat = {
+    type: 'seat', exercise: 'sit', twoSided: true, rotY: 0, x: 1, z: 2, spot: { x: 1, z: 2, y: 0.48, r: 0 },
+  };
+  // 벤치 앞(+z)에서 벤치를 바라보며 접근 → 앞쪽을 보고 앉음
+  player.position.x = 1; player.position.z = 2.6; player.rotY = Math.PI;
+  player.startActivity(seat);
+  assert.equal(player.rotY, 0);
+  assert.ok(player.activity.exit.z > 2.5);
+  // 벤치 뒤(-z)에서 접근 → 반대쪽을 보고 앉고, 뒤쪽으로 일어남
+  player.activity = null;
+  player.position.x = 1; player.position.z = 1.4; player.rotY = 0;
+  player.startActivity(seat);
+  assert.ok(Math.abs(player.rotY - Math.PI) < 1e-9);
+  assert.ok(player.activity.exit.z < 1.5);
+  // 운동기구는 지정 방향 사용
+  player.activity = null;
+  player.startActivity({ type: 'machine', exercise: 'ex_bench', x: 0, z: 0, rotY: 0, spot: { x: 1, z: 2, y: 0, r: -0.7 } });
+  assert.equal(player.rotY, -0.7);
+});
+
+test('머리 모양: 헤어 껍질은 모든 얼굴형·체중에서 머리 표면 밖, 얼굴 파츠는 표면 위', () => {
+  for (const face of ['round', 'oval', 'square', 'vline']) {
+    for (const cheek of [1, 1.07, 1.14]) {
+      const { positions } = buildShell(face, cheek, { scale: 1.03 });
+      for (let i = 0; i < positions.length; i += 3) {
+        assert.equal(insideHead(face, cheek, positions[i], positions[i + 1], positions[i + 2]), false, `${face} ${cheek}`);
+      }
+      // 눈·입 위치: 표면에서 1cm 이내 (떠 있거나 파묻히지 않음)
+      for (const [x, y] of [[0.1, 0.012], [-0.1, 0.012], [0, -0.112], [0, -0.045]]) {
+        const p = facePlacement(face, cheek, x, y, 0.002);
+        assert.equal(insideHead(face, cheek, p.x, p.y, p.z), false);
+        assert.equal(insideHead(face, cheek, p.x, p.y, p.z - 0.01), true);
+      }
+    }
+  }
 });
 
 test('충돌: 박스 밖으로 밀어냄', () => {

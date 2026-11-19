@@ -49,6 +49,36 @@ export const FACE_SHAPES = [
   { id: 'vline', label: 'V라인' },
 ];
 
+// 메이플스토리처럼 얼굴 파츠를 독립적으로 골라 조합할 수 있습니다.
+export const EYE_STYLES = [
+  { id: 'round', label: '동그란 눈' },
+  { id: 'sparkle', label: '반짝이는 눈' },
+  { id: 'oval', label: '타원 눈' },
+  { id: 'sleepy', label: '졸린 눈' },
+  { id: 'sharp', label: '날카로운 눈' },
+  { id: 'smile', label: '웃는 눈' },
+];
+export const BROW_STYLES = [
+  { id: 'soft', label: '부드러운 눈썹' },
+  { id: 'straight', label: '일자 눈썹' },
+  { id: 'angled', label: '짙은 눈썹' },
+  { id: 'none', label: '눈썹 없음' },
+];
+export const NOSE_STYLES = [
+  { id: 'button', label: '작은 코' },
+  { id: 'dot', label: '점 코' },
+  { id: 'round', label: '동그란 코' },
+  { id: 'none', label: '코 없음' },
+];
+export const MOUTH_STYLES = [
+  { id: 'smile', label: '미소' },
+  { id: 'small', label: '작은 입' },
+  { id: 'open', label: '벌린 입' },
+  { id: 'cat', label: '고양이 입' },
+  { id: 'grin', label: '활짝 웃음' },
+  { id: 'neutral', label: '무표정' },
+];
+
 export const OUTFITS = [
   { id: 'tshirt_shorts', label: '티셔츠 + 반바지', longSleeve: false, sleeveless: false, longPants: false, hood: false },
   { id: 'tank_shorts', label: '나시 + 반바지', longSleeve: false, sleeveless: true, longPants: false, hood: false },
@@ -88,6 +118,10 @@ export const DEFAULT_APPEARANCE = Object.freeze({
   hair: 'short',
   hairColor: HAIR_COLORS[0],
   face: 'round',
+  eyes: 'round',
+  brows: 'soft',
+  nose: 'button',
+  mouth: 'smile',
   outfit: 'tshirt_shorts',
   topColor: CLOTH_COLORS[3],
   bottomColor: CLOTH_COLORS[1],
@@ -105,6 +139,10 @@ export const APPEARANCE_FIELDS = {
   hair: ids(HAIR_STYLES),
   hairColor: HAIR_COLORS,
   face: ids(FACE_SHAPES),
+  eyes: ids(EYE_STYLES),
+  brows: ids(BROW_STYLES),
+  nose: ids(NOSE_STYLES),
+  mouth: ids(MOUTH_STYLES),
   outfit: ids(OUTFITS),
   topColor: CLOTH_COLORS,
   bottomColor: CLOTH_COLORS,

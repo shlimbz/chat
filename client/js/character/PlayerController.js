@@ -47,8 +47,19 @@ export class PlayerController {
 
   /** 기구 운동 / 벤치 앉기 시작: 정해진 자리로 이동해 자세 잡기 */
   startActivity(it) {
-    this.activity = { it, type: it.exercise };
-    const sp = it.spot;
+    let sp = it.spot;
+    let exit = { x: it.x, z: it.z };
+    if (it.twoSided) {
+      // 벤치의 어느 쪽에 서 있는지(앞/뒤)로 앉는 방향과 일어날 위치를 정합니다.
+      const fx = Math.sin(it.rotY);
+      const fz = Math.cos(it.rotY);
+      const side = (this.position.x - sp.x) * fx + (this.position.z - sp.z) * fz >= 0 ? 1 : -1;
+      sp = {
+        x: sp.x + fx * 0.03 * side, z: sp.z + fz * 0.03 * side, y: sp.y, r: it.rotY + (side > 0 ? 0 : Math.PI),
+      };
+      exit = { x: sp.x + fx * 0.62 * side, z: sp.z + fz * 0.62 * side };
+    }
+    this.activity = { it, type: it.exercise, exit };
     this.position.x = sp.x;
     this.position.z = sp.z;
     this.position.y = sp.y;
@@ -61,13 +72,13 @@ export class PlayerController {
     this._syncModel();
   }
 
-  /** 운동/앉기 종료: 기구 앞(상호작용 지점)으로 내려옴 */
+  /** 운동/앉기 종료: 들어온 쪽(상호작용 지점)으로 내려옴 */
   stopActivity() {
     const a = this.activity;
     if (!a) return;
     this.activity = null;
     this.model.setExercise(null);
-    this.teleport(a.it.x, a.it.z, this.rotY + 0);
+    this.teleport(a.exit.x, a.exit.z, this.rotY);
   }
 
   teleport(x, z, rotY = this.rotY, y = 0) {
