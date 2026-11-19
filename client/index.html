@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ONLINE GYM</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🏋️</text></svg>" />
+  <link rel="stylesheet" href="./css/style.css" />
+
+  <!--
+    배포 환경 설정 (선택): 서버 주소를 여기서 바꿀 수도 있습니다. (Phase 2부터 사용)
+    <script>window.ONLINE_GYM_CONFIG = { SERVER_URL: 'https://my-gym-server.onrender.com' };</script>
+  -->
+
+  <!-- Three.js 는 CDN 에서 불러옵니다 (설치 불필요). 버전을 고정해 갑작스런 변경을 막습니다. -->
+  <script type="importmap">
+    {
+      "imports": {
+        "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js",
+        "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/"
+      }
+    }
+  </script>
+</head>
+<body>
+  <div id="game"></div>
+  <div id="ui"></div>
+
+  <div id="loading" class="loading">
+    <div class="logo">ONLINE <span>GYM</span></div>
+    <div class="loading-text">불러오는 중…</div>
+  </div>
+
+  <script>
+    // file:// 로 연 경우 또는 CDN 로딩 실패 시 안내
+    (function () {
+      var msg = null;
+      if (location.protocol === 'file:') {
+        msg = 'index.html 파일을 직접 열면 실행되지 않습니다. 터미널에서 "npm start" 를 실행한 뒤 http://localhost:5173 으로 접속하세요.';
+      }
+      setTimeout(function () {
+        if (window.__ONLINE_GYM_BOOTED) return;
+        var el = document.querySelector('#loading .loading-text');
+        if (el) el.textContent = msg || 'Three.js 를 불러오지 못했습니다. 인터넷 연결(jsdelivr CDN 접근)을 확인한 뒤 새로고침 하세요.';
+      }, msg ? 0 : 10000);
+    })();
+  </script>
+  <script type="module" src="./js/main.js"></script>
+</body>
+</html>
