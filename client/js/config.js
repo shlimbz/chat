@@ -6,7 +6,7 @@
 // ★ 게임 서버를 배포한 뒤, 그 주소를 여기에 입력하세요. (예: 'https://online-gym-server.onrender.com')
 //   비워두면 localhost 에서 접속할 때만 http://localhost:3000 서버를 사용하고,
 //   그 외에는 오프라인 모드로 실행됩니다.
-const DEPLOYED_SERVER_URL = '';
+const DEPLOYED_SERVER_URL = 'https://online-gym-server.onrender.com/';
 
 const override = (typeof window !== 'undefined' && window.ONLINE_GYM_CONFIG) || {};
 const SERVER_KEY = 'onlinegym.server.v1';
