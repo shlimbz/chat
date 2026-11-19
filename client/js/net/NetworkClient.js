@@ -62,7 +62,7 @@ export class NetworkClient {
       this.socket = socket;
 
       // 서버 이벤트를 등록된 핸들러로 전달
-      for (const ev of [EV.PLAYER_JOIN, EV.PLAYER_LEAVE, EV.PLAYER_APPEARANCE, EV.STATE, EV.CORRECT, EV.CHAT, EV.ATTACK_FX, EV.HIT, EV.WALLET]) {
+      for (const ev of [EV.PLAYER_JOIN, EV.PLAYER_LEAVE, EV.PLAYER_APPEARANCE, EV.STATE, EV.CORRECT, EV.CHAT, EV.ATTACK_FX, EV.HIT, EV.WALLET, EV.RANKING_LIVE, EV.BAG_RESULT]) {
         socket.on(ev, (data) => this._emitLocal(ev, data));
       }
 
@@ -118,8 +118,8 @@ export class NetworkClient {
     if (this.connected) this.socket.emit(EV.MOVE, state);
   }
 
-  sendAttack(type) {
-    if (this.connected) this.socket.emit(EV.ATTACK, type);
+  sendAttack(type, t) {
+    if (this.connected) this.socket.emit(EV.ATTACK, { type, t });
   }
 
   /** 서버 왕복 시간(ms) */

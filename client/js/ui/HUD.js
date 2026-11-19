@@ -17,13 +17,11 @@ export class HUD {
     this.root.append(el('div', { class: 'hud-box hud-top-left' }, [this.levelEl, this.nameEl]));
     // 코인 (누르면 상점)
     this.coinVal = el('span', { text: '0' });
-    this.coinBtn = el('button', { class: 'hud-coins hidden', attrs: { type: 'button', title: '치장 상점 열기' } }, [el('span', { text: '🪙' }), this.coinVal, el('span', { class: 'hud-coins-shop', text: '상점' })]);
+    this.coinBtn = el('button', { class: 'hud-coins hidden', attrs: { type: 'button', title: '치장 상점 열기' } }, [el('span', { text: '🪙' }), this.coinVal, el('span', { class: 'hud-coins-shop', text: '?' })]);
     this.coinBtn.addEventListener('click', () => this.onCoinClick?.());
     this.bagBtn = el('button', { class: 'hud-quick-btn', attrs: { type: 'button', title: '가방 (I)' }, html: '🎒 <span>가방</span><kbd>I</kbd>' });
     this.bagBtn.addEventListener('click', () => this.onBagClick?.());
-    this.rankBtn = el('button', { class: 'hud-quick-btn', attrs: { type: 'button', title: '오늘의 랭킹' }, html: '🏆 <span>랭킹</span>' });
-    this.rankBtn.addEventListener('click', () => this.onRankClick?.());
-    this.quick = el('div', { class: 'hud-quick hidden' }, [this.coinBtn, this.bagBtn, this.rankBtn]);
+    this.quick = el('div', { class: 'hud-quick hidden' }, [this.coinBtn, this.bagBtn]);
     this.coinBtn.classList.remove('hidden');
     this.root.append(this.quick);
 
@@ -88,7 +86,12 @@ export class HUD {
 
   /** @param {{count:number, max?:number, label?:string, state:'online'|'warn'|'offline'}} o */
   setOnline({ count, max, label, state }) {
-    this.onlineEl.textContent = label ? `접속자 ${count}명 · ${label}` : `접속자 ${count}${max ? ` / ${max}` : ''}명`;
+    // 모바일은 짧게 (채팅창과 겹치지 않게)
+    if (document.body.classList.contains('mobile')) {
+      this.onlineEl.textContent = label ? `👥 ${count} · ${label.replace(' 모드', '')}` : `👥 ${count}${max ? `/${max}` : ''}`;
+    } else {
+      this.onlineEl.textContent = label ? `접속자 ${count}명 · ${label}` : `접속자 ${count}${max ? ` / ${max}` : ''}명`;
+    }
     this.onlineEl.dataset.state = state;
   }
 
@@ -135,6 +138,14 @@ export class HUD {
 
   setVisible(v) {
     this.root.classList.toggle('hidden', !v);
+  }
+
+  /** 화면 가운데 위쪽에 잠깐 떠오르는 문구 (PERFECT! / MISS) */
+  pop(text, color = '#ffffff') {
+    const p = el('div', { class: 'hud-pop', text });
+    p.style.color = color;
+    this.root.append(p);
+    setTimeout(() => p.remove(), 900);
   }
 
   /** 코인 표시 (null 이면 숨김 = 오프라인) */

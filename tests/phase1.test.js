@@ -237,3 +237,14 @@ test('옷 무늬 다각형 삼각분할', async () => {
     assert.ok(Math.abs(area(poly, tris) - polyArea(poly)) < 1e-9); // 전부 같은 방향(앞면), 빈틈/겹침 없음
   }
 });
+
+test('샌드백 흔들림: 서버·화면이 같은 시각이면 같은 위치, 퍼펙트 구간은 약 18%', async () => {
+  const { bagAngle, bagInZone, BAG_SWING } = await import('../client/js/shared/bagMotion.js');
+  assert.equal(bagAngle(0, 123456), bagAngle(0, 123456));
+  let inZone = 0;
+  const N = 10000;
+  for (let i = 0; i < N; i++) if (bagInZone(1, (i / N) * BAG_SWING.periodMs)) inZone++;
+  assert.ok(inZone / N > 0.15 && inZone / N < 0.21, String(inZone / N));
+  // 가운데 구간에서는 기울기가 작음
+  for (let t = 0; t < 5000; t += 37) if (bagInZone(0, t)) assert.ok(Math.abs(bagAngle(0, t)) < BAG_SWING.amplitude * BAG_SWING.zone + 1e-9);
+});

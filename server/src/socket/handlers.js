@@ -1,11 +1,14 @@
 // Socket.IO 이벤트 처리 — 접속 인증(세션+캐릭터), 위치 동기화, 채팅, 전투, 관리자 기능
 import {
-  EV, AUTH_ERRORS, PROTOCOL_VERSION, SERVER_TICK_HZ, ATTACKS, ACTIONS,
+  EV, AUTH_ERRORS, PROTOCOL_VERSION, SERVER_TICK_HZ, ATTACKS, ACTIONS, CHAT_TYPES,
 } from '../../../client/js/shared/protocol.js';
 import { sanitizeAppearance } from '../../../client/js/shared/appearance.js';
 import { ECONOMY } from '../../../client/js/shared/economy.js';
-import { exerciseSpots, PUNCHING_BAGS } from '../../../client/js/shared/gymLayout.js';
+import {
+  exerciseSpots, PUNCHING_BAGS, shopPoint, SHOP_RANGE,
+} from '../../../client/js/shared/gymLayout.js';
 import { findPunchingBagTarget } from '../../../client/js/world/bagCollision.js';
+import { bagInZone } from '../../../client/js/shared/bagMotion.js';
 import { PlayerRegistry } from '../game/PlayerRegistry.js';
 import { resolveAttack } from '../game/combat.js';
 import {
@@ -32,7 +35,7 @@ export function attachGameHandlers(io, {
 
   const sendSystem = (socket, text) => socket.emit(EV.CHAT, ChatService.system(text));
   const SPOTS = exerciseSpots();
-  const BAGS = PUNCHING_BAGS.map((b) => ({ worldX: b.x, worldZ: b.z }));
+  const BAGS = PUNCHING_BAGS.map((b, idx) => ({ worldX: b.x, worldZ: b.z, idx }));
 
   /** 같은 계정으로 접속한 모든 창에 지갑 상태 전송 */
   const sendWallet = (accountId, extra = {}) => {
@@ -207,6 +210,7 @@ export function attachGameHandlers(io, {
       accountId: account.id, username: account.username, admin: account.isAdmin,
     });
     player.exAcc = 0;
+    stats.setName(user.id, user.nickname);
     player.bagCoinAt = 0;
     log(`[join] ${user.nickname} (#${user.id}, ${account.username}${account.isAdmin ? ', 관리자' : ''}) — 현재 ${registry.count}명`);
 
@@ -242,8 +246,9 @@ export function attachGameHandlers(io, {
     socket.on(EV.PING, (t, ack) => { if (typeof ack === 'function') ack(t); });
 
     // ── 공격 ─────────────────────────────────────────
-    socket.on(EV.ATTACK, (type) => {
+    socket.on(EV.ATTACK, (msg) => {
       const p = registry.get(socket.id);
+      const type = typeof msg === 'string' ? msg : msg?.type;
       if (!p || !ATTACKS[type]) return;
       const res = resolveAttack(p, registry.list(), type);
       if (!res.ok) return;
@@ -251,17 +256,27 @@ export function attachGameHandlers(io, {
       for (const h of res.hits) {
         io.emit(EV.HIT, { from: p.id, to: h.target.id, type, kx: h.kx, kz: h.kz, down: h.down });
       }
-      // 샌드백 명중 → 코인 (서버가 아는 위치·방향으로 다시 판정)
+      // ── 샌드백: 서버가 아는 위치·방향으로 다시 판정 + "가운데(초록 불)" 타이밍 판정 ──
       const reach = type === 'kick' ? 1.05 : 0.9;
-      const bag = findPunchingBagTarget(BAGS, {
+      const bagIdx = findPunchingBagTarget(BAGS, {
         hitX: p.x + Math.sin(p.r) * reach, hitZ: p.z + Math.cos(p.r) * reach, fromX: p.x, fromZ: p.z, rotY: p.r,
-      });
+      })?.idx;
+      if (bagIdx === undefined) return;
       const now = Date.now();
-      if (bag) stats.addBagHit(p.id);
-      if (bag && now - p.bagCoinAt >= ECONOMY.BAG_COIN_COOLDOWN_MS) {
-        p.bagCoinAt = now;
-        reward(p, ECONOMY.BAG_COINS, 'bag');
+      // 친 사람 화면의 서버 시각 (네트워크 지연만큼 과거) — 너무 옛날/미래 값은 믿지 않음
+      const ct = Number(msg?.t);
+      const t = Number.isFinite(ct) && ct <= now + 50 && ct >= now - 450 ? ct : now - 120;
+      const perfect = bagInZone(bagIdx, t + ATTACKS[type].windupMs); // 팔/다리가 닿는 순간 기준
+      let coins = 0;
+      if (perfect) {
+        stats.addBagHit(p.id);
+        if (now - p.bagCoinAt >= ECONOMY.BAG_COIN_COOLDOWN_MS) {
+          p.bagCoinAt = now;
+          coins = economy.earn(p.accountId, type === 'kick' ? ECONOMY.BAG_PERFECT_KICK : ECONOMY.BAG_PERFECT_PUNCH);
+          if (coins > 0) sendWallet(p.accountId, { gained: coins, reason: 'bag' });
+        }
       }
+      socket.emit(EV.BAG_RESULT, { bag: bagIdx, perfect, coins, type });
     });
 
     // ── 외형 변경 ─────────────────────────────────────
@@ -275,9 +290,16 @@ export function attachGameHandlers(io, {
     });
 
     // ── 상점 (구매/판매) ──────────────────────────────
+    const SHOP_AT = shopPoint();
     const shop = (event, fn) => socket.on(event, (itemId, ack) => {
       if (typeof ack !== 'function') return;
       if (typeof itemId !== 'string' || itemId.length > 40) { ack({ ok: false, message: '잘못된 요청입니다.' }); return; }
+      // 상점 가판대 앞에서만 사고팔 수 있음 (서버가 아는 위치로 확인)
+      const me = registry.get(socket.id);
+      if (!me || Math.hypot(me.x - SHOP_AT.x, me.z - SHOP_AT.z) > SHOP_RANGE) {
+        ack({ ok: false, message: '상점 가판대 앞에서만 사고팔 수 있어요.' });
+        return;
+      }
       fn(itemId).then((r) => {
         ack(r);
         if (r.ok) {
@@ -317,7 +339,10 @@ export function attachGameHandlers(io, {
       }
       switch (cmd.kind) {
         case 'global': {
-          io.emit(EV.CHAT, await chat.saveGlobal(p, cmd.text));
+          // 먼저 모두에게 보내고, DB 저장은 뒤에서 (DB 왕복 시간만큼 채팅이 밀리지 않게)
+          const { msg, saved } = chat.post(CHAT_TYPES.GLOBAL, p, null, cmd.text);
+          io.emit(EV.CHAT, msg);
+          saved.catch((err) => log('[chat] 저장 실패', err));
           break;
         }
         case 'whisper':
@@ -327,7 +352,8 @@ export function attachGameHandlers(io, {
           const target = registry.getByNickname(targetName);
           if (!target) { sendSystem(socket, `'${targetName}'님은 현재 접속 중이 아닙니다.`); break; }
           if (target.id === p.id) { sendSystem(socket, '자기 자신에게는 귓속말을 보낼 수 없습니다.'); break; }
-          const msg = await chat.saveWhisper(p, target, cmd.text);
+          const { msg, saved } = chat.post(CHAT_TYPES.WHISPER, p, target, cmd.text);
+          saved.catch((err) => log('[chat] 저장 실패', err));
           // 귓속말은 보낸 사람과 받는 사람에게만 전송 (전체 브로드캐스트 금지)
           io.to(target.socketId).emit(EV.CHAT, msg);
           socket.emit(EV.CHAT, msg);
@@ -420,6 +446,17 @@ export function attachGameHandlers(io, {
       }
     }
   }, 1000);
+  // ── 실시간 랭킹: 5초마다 계산해서 바뀌었을 때만 모두에게 전송 ──
+  let lastRanking = '';
+  const rankingTimer = setInterval(() => {
+    if (!registry.count) return;
+    stats.ranking(10).then((r) => {
+      const key = JSON.stringify(r);
+      if (key === lastRanking) return;
+      lastRanking = key;
+      io.emit(EV.RANKING_LIVE, r);
+    }, (err) => log('[ranking] 오류', err));
+  }, 5000);
   const flushTimer = setInterval(() => {
     economy.flushAll();
     stats.flush().catch((err) => log('[db] 랭킹 저장 실패', err));
@@ -439,6 +476,7 @@ export function attachGameHandlers(io, {
       clearInterval(tick);
       clearInterval(exerciseTick);
       clearInterval(flushTimer);
+      clearInterval(rankingTimer);
       await economy.flushAll();
       await stats.flush().catch(() => {});
       await Promise.allSettled(registry.list().map((p) => characters.saveLastSeen(p.id, { x: p.x, z: p.z, r: p.r })));

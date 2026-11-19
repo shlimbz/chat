@@ -57,6 +57,8 @@ export const DEFAULT_SETTINGS = Object.freeze({
   showFps: false,
   sound: true,
   autoRes: true, // 프레임이 낮으면 해상도 자동 조절
+  fpsCap: null, // 30fps 제한 (null = 모바일이면 켬)
+  othersFx: true, // 다른 사람 트레일·오라 표시
   keys: Object.freeze({ punch: 'KeyJ', kick: 'KeyK' }), // 공격 키 (설정에서 변경)
 });
 
@@ -74,6 +76,8 @@ export function loadSettings() {
   if (typeof data.showFps === 'boolean') s.showFps = data.showFps;
   if (typeof data.sound === 'boolean') s.sound = data.sound;
   if (typeof data.autoRes === 'boolean') s.autoRes = data.autoRes;
+  if (typeof data.fpsCap === 'boolean') s.fpsCap = data.fpsCap;
+  if (typeof data.othersFx === 'boolean') s.othersFx = data.othersFx;
   const k = data.keys && typeof data.keys === 'object' ? data.keys : {};
   const ok = (c) => typeof c === 'string' && /^[A-Za-z0-9]{2,20}$/.test(c) && !RESERVED_KEYS.has(c);
   s.keys = {

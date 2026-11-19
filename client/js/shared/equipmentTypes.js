@@ -11,4 +11,7 @@ export const EQUIPMENT_TYPES = {
   shoulderpress: { label: '숄더프레스', minigamePhase: null, muscles: ['shoulders'], exercise: 'ex_shoulder', spot: { x: 0, z: 0.12, y: 0.55, r: 0 } },
   latpulldown: { label: '랫풀다운', minigamePhase: null, muscles: ['back'], exercise: 'ex_lat', spot: { x: 0, z: 0.32, y: 0.55, r: Math.PI } },
   seat: { label: '벤치', minigamePhase: null, muscles: [], exercise: 'sit', spot: { x: 0, z: 0, y: 0.5, r: 0 } },
+  // 운동이 아닌 상호작용 (E 로 화면 열기)
+  shop: { label: '치장 상점', minigamePhase: null, muscles: [], exercise: null, spot: { x: 0, z: 1.2, y: 0, r: 0 } },
+  rankboard: { label: '오늘의 랭킹', minigamePhase: null, muscles: [], exercise: null, spot: { x: 0, z: 0, y: 0, r: 0 } },
 };

@@ -65,7 +65,7 @@ export class Shop {
           this.gridEl,
           this.earnEl = el('div', {
             class: 'shop-earn',
-            text: `💪 기구 운동 ${ECONOMY.EXERCISE_SECONDS_PER_COIN}초 = 1코인 · 🥊 샌드백 명중 = ${ECONOMY.BAG_COINS}코인 (시간당 최대 ${ECONOMY.HOURLY_CAP}) · 되팔면 ${Math.round(ECONOMY.SELL_RATE * 100)}%`,
+            text: `💪 기구 운동 ${ECONOMY.EXERCISE_SECONDS_PER_COIN}초 = 1코인 · 🥊 샌드백 PERFECT(초록 불일 때) 주먹 ${ECONOMY.BAG_PERFECT_PUNCH}·발차기 ${ECONOMY.BAG_PERFECT_KICK}코인 (시간당 최대 ${ECONOMY.HOURLY_CAP}) · 되팔면 ${Math.round(ECONOMY.SELL_RATE * 100)}%`,
           }),
           this.msgEl,
         ]),

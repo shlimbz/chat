@@ -62,13 +62,18 @@ class RemotePlayer {
       this.pos.z = a.z + (c.z - a.z) * k;
       this.rot = lerpAngle(a.r, c.r, k);
     } else if (b.length >= 2 && renderT > b[b.length - 1].t) {
-      // 최신 데이터보다 앞 → 마지막 속도로 짧게 예측 (그 이후는 멈춤)
+      // 최신 데이터보다 앞 → 걷는 중일 때만 아주 짧게 예측하고, 그 뒤에는 마지막 위치로 정확히 돌아옴
+      // (예전: 예측한 만큼 어긋난 채로 멈춰서, 기구에 앉는 순간처럼 위치가 확 바뀌면 기구와 어긋나 보였음)
       const c = b[b.length - 1];
       const a = b[b.length - 2];
       const span = Math.max(1, c.t - a.t);
-      const ahead = Math.min(MAX_EXTRAPOLATE_MS, renderT - c.t);
-      const moving = Math.hypot(c.x - a.x, c.z - a.z) > 0.001 && span < 400;
-      const k = moving ? ahead / span : 0;
+      const since = renderT - c.t;
+      const step = Math.hypot(c.x - a.x, c.z - a.z);
+      // 순간이동(앉기·일어나기 위치 이동)은 예측하지 않음: 실제 이동 속도 범위일 때만
+      const walking = !EXERCISES.includes(c.a) && step > 0.001 && (step / span) * 1000 < 6.5 && span < 400;
+      // 예측량: 0 → 최대(MAX_EXTRAPOLATE_MS) → 다시 0 (그 사이 새 패킷이 오면 보간으로 넘어감)
+      const ahead = walking ? Math.max(0, Math.min(since, 2 * MAX_EXTRAPOLATE_MS - since)) : 0;
+      const k = ahead / span;
       const tx = c.x + (c.x - a.x) * k;
       const tz = c.z + (c.z - a.z) * k;
       const f = Math.min(1, dt * 15);
@@ -76,6 +81,8 @@ class RemotePlayer {
       this.pos.z += (tz - this.pos.z) * f;
       this.pos.y += (c.y - this.pos.y) * f;
       this.rot = lerpAngle(this.rot, c.r, f);
+      // 운동·앉기 중이면 오차 없이 서버 위치 그대로
+      if (EXERCISES.includes(c.a)) { this.pos.x = c.x; this.pos.y = c.y; this.pos.z = c.z; this.rot = c.r; }
     } else if (b.length) {
       const last = b[b.length - 1];
       const f = Math.min(1, dt * 12);
@@ -131,7 +138,7 @@ export class RemotePlayers {
   constructor(scene) {
     this.scene = scene;
     this.map = new Map();
-    this.opts = { blobShadow: true, castShadow: false, showNameTags: true };
+    this.opts = { blobShadow: true, castShadow: false, showNameTags: true, othersFx: true };
     this.clockOffset = null; // 로컬시계 - 서버시계 (가장 빨리 도착한 패킷 기준)
   }
 
@@ -159,6 +166,7 @@ export class RemotePlayers {
     const existing = this.map.get(info.id);
     if (existing) existing.dispose();
     const p = new RemotePlayer(info, this.opts);
+    p.model.setFxEnabled(this.opts.othersFx !== false);
     this.map.set(info.id, p);
     this.scene.add(p.model.root);
     return p;
@@ -172,7 +180,10 @@ export class RemotePlayers {
   }
 
   setAppearance(id, appearance) {
-    this.map.get(id)?.model.setAppearance(appearance);
+    const m = this.map.get(id)?.model;
+    if (!m) return;
+    m.setAppearance(appearance);
+    m.setFxEnabled(this.opts.othersFx !== false);
   }
 
   /** 서버 STATE 패킷: { t: 서버시각, p: [[id, x, y, z, r, a], ...] } */
@@ -197,6 +208,7 @@ export class RemotePlayers {
       p.model.setBlobShadow(this.opts.blobShadow);
       p.model.setCastShadow(this.opts.castShadow);
       if (p.model.nameTag) p.model.nameTag.visible = this.opts.showNameTags;
+      p.model.setFxEnabled(this.opts.othersFx !== false);
     }
   }
 

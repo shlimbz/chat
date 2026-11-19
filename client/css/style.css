@@ -195,6 +195,14 @@ html, body {
 .chat-input::placeholder { color: rgba(255,255,255,.55); }
 .chat.active .chat-input { border-color: var(--yellow); background: rgba(20,22,28,.8); }
 .chat-input:disabled { opacity: .6; }
+.chat-input-row { display: flex; gap: 6px; align-items: stretch; }
+.chat-input-row .chat-input { flex: 1; min-width: 0; }
+.chat-send {
+  font: inherit; font-weight: 800; font-size: 13px; color: var(--ink); cursor: pointer;
+  background: var(--yellow); border: 0; border-radius: 10px; padding: 0 14px; touch-action: manipulation;
+}
+.chat-send:active { transform: translateY(1px); }
+body.mobile .chat.expanded .chat-send { font-size: 15px; padding: 0 18px; min-height: 44px; }
 .hud-prompt {
   position: absolute; left: 50%; bottom: 90px; transform: translateX(-50%);
   background: rgba(255,255,255,.95); color: var(--ink); font-weight: 800;
@@ -341,6 +349,7 @@ kbd {
 /* ── 모바일 터치 조작 ─────────────── */
 .touch-ui { position: fixed; inset: 0; pointer-events: none; z-index: 12; }
 .touch-ui > * { pointer-events: auto; }
+#ui > .touch-ui { pointer-events: none; } /* 빈 화면 터치는 아래 3D 화면(카메라 회전)·채팅으로 통과 */
 .joy-zone { position: absolute; left: 0; bottom: 0; width: 45vw; height: 55vh; touch-action: none; }
 .joy-base {
   position: absolute; left: 90px; top: calc(100% - 110px); width: 110px; height: 110px; margin: -55px 0 0 -55px;
@@ -369,15 +378,18 @@ body.mobile .hud-box { font-size: 12px; padding: 6px 10px; }
 body.mobile .hud-top-left { top: 8px; left: 8px; }
 body.mobile .hud-top-right { top: 8px; right: 8px; }
 body.mobile .hud-name { font-size: 14px; }
-body.mobile .hud-chat-slot { left: 8px; right: auto; top: 50px; bottom: auto; width: min(60vw, 330px); }
+body.mobile .hud-chat-slot { left: calc(8px + env(safe-area-inset-left)); right: auto; top: calc(8px + env(safe-area-inset-top)); bottom: auto; width: min(calc(100vw - 140px), 330px); }
 body.mobile .chat-log { height: 110px; }
-body.mobile .chat:not(.expanded) .chat-input { display: none; }
+body.mobile .chat:not(.expanded) .chat-input-row { display: none; }
 body.mobile .chat:not(.expanded) .chat-head .chat-tab { display: none; }
 body.mobile .chat-line { font-size: 12px; }
 /* 채팅 모드: 채팅창이 화면 대부분 차지 (키보드가 올라와도 보이게) */
 body.mobile .chat.expanded {
-  position: fixed; left: 0; right: 0; top: var(--vv-top, 0px); height: var(--vvh, 100dvh);
-  padding: 8px; background: rgba(20, 22, 28, .82); z-index: 30; gap: 6px;
+  /* 반투명: 뒤의 캐릭터·맵이 보이게. 키보드가 올라와도 보이는 영역 위쪽에 붙음 */
+  position: fixed; left: 0; right: 62px; top: var(--vv-top, 0px); height: calc(var(--vvh, 100dvh) * 0.62);
+  padding: calc(8px + env(safe-area-inset-top)) 8px 8px calc(8px + env(safe-area-inset-left));
+  background: linear-gradient(180deg, rgba(16, 18, 24, .58), rgba(16, 18, 24, .38)); z-index: 30; gap: 6px;
+  border-bottom-right-radius: 16px;
 }
 body.mobile .chat.expanded .chat-body { flex: 1; display: flex; flex-direction: column; min-height: 0; opacity: 1; }
 body.mobile .chat.expanded .chat-log { height: auto; flex: 1; }
@@ -399,7 +411,7 @@ body.mobile .menu-btn { padding: 12px 14px; }
   .creator-wrap { height: 96dvh; }
 }
 body.mobile.chat-mode .hud-top-left, body.mobile.chat-mode .hud-top-right, body.mobile.chat-mode .hud-toast { display: none; }
-body.mobile .chat.expanded { background: rgba(20, 22, 28, .94); }
+body.mobile .chat.expanded .chat-line { text-shadow: 0 1px 2px rgba(0,0,0,.85); }
 
 /* ── 체형 슬라이더 ───────────────── */
 .slider-row { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--ink-soft); }
@@ -516,3 +528,36 @@ body.mobile.chat-mode .hud-quick { display: none; }
 .rank-empty { color: var(--ink-soft); font-size: 13px; padding: 10px 4px; }
 .rank-me { font-weight: 800; color: #344557; }
 @media (max-width: 640px) { .rank-cols { flex-direction: column; } }
+
+/* ── 모바일 간결 화면 ─────────────────── */
+body.mobile .hud-top-left { display: none; } /* 이름·레벨은 캐릭터 머리 위 이름표로 충분 */
+body.mobile .hud-top-right { top: calc(8px + env(safe-area-inset-top)); right: calc(8px + env(safe-area-inset-right)); }
+body.mobile .hud-quick { left: auto; top: calc(44px + env(safe-area-inset-top)); right: calc(8px + env(safe-area-inset-right)); }
+body.mobile .hud-quick-btn { display: none; } /* 가방은 오른쪽 버튼 줄에 */
+body.mobile .ttop { top: calc(84px + env(safe-area-inset-top)); right: calc(8px + env(safe-area-inset-right)); }
+body.mobile .tbtns { right: calc(14px + env(safe-area-inset-right)); bottom: calc(18px + env(safe-area-inset-bottom)); }
+body.mobile .joy-zone { padding-bottom: env(safe-area-inset-bottom); }
+.tbtn-kick svg { display: block; margin: 0 auto; }
+.tbtn, .ttop, .hud-quick, .chat-head { -webkit-user-select: none; -webkit-touch-callout: none; }
+/* 채팅 중: 조이스틱·공격 버튼 숨김, 오른쪽 위 버튼(🎮 돌아가기)은 채팅 위에 */
+.touch-ui.chatting .joy-zone, .touch-ui.chatting .tbtns { display: none; }
+body.mobile.chat-mode .touch-ui { z-index: 31; }
+body.mobile.chat-mode .hud-quick { display: none; }
+body.mobile.chat-mode .tbtn-chat { background: var(--yellow); }
+
+/* 모바일 채팅: 머리줄 버튼은 숨기고(💬/🎮 버튼으로 열고 닫음), 열렸을 때는 배경을 투명하게 → 뒤의 게임이 보임 */
+body.mobile .chat .chat-toggle { display: none; }
+body.mobile .chat:not(.expanded) .chat-head { display: none; }
+body.mobile .chat.expanded .chat-log, body.mobile .chat.expanded .chat-body { background: transparent; }
+body.mobile .chat.expanded .chat-input { background: rgba(16, 18, 24, .7); }
+body.mobile .chat:not(.expanded) .chat-log { cursor: pointer; }
+
+.chat-line.pending { opacity: .6; }
+
+.hud-pop {
+  position: absolute; left: 50%; top: 30%; transform: translateX(-50%);
+  font-size: 30px; font-weight: 900; letter-spacing: 1px; pointer-events: none;
+  text-shadow: 0 2px 0 #1d1d22, 0 0 12px rgba(0,0,0,.45); animation: hud-pop .9s ease-out forwards;
+}
+@keyframes hud-pop { 0% { opacity: 0; transform: translate(-50%, 8px) scale(.8); } 15% { opacity: 1; transform: translate(-50%, 0) scale(1.08); } 100% { opacity: 0; transform: translate(-50%, -22px) scale(1); } }
+body.mobile .hud-pop { font-size: 24px; top: 26%; }

@@ -25,6 +25,8 @@ export class ChatPanel {
     this.net = null;
     this.selfName = '';
     this.seenIds = new Set();
+    this.seenKeys = new Set(); // id 가 없는(바로 전송된) 메시지와 나중에 불러온 기록의 중복 방지
+    this.pendingMine = []; // 보내자마자 내 화면에 먼저 보여준 메시지 (서버 응답이 오면 교체)
     this.oldestGlobalId = null;
     this.collapsed = false;
     this.unread = 0;
@@ -67,11 +69,22 @@ export class ChatPanel {
         this.blur();
       }
     });
+    // 보내기 버튼 (모바일 키보드에서 엔터가 불편할 때). 누를 때 입력창 포커스가 풀리지 않게 함
+    this.sendBtn = el('button', { class: 'chat-send', attrs: { type: 'button', 'aria-label': '보내기' }, text: '전송' });
+    this.sendBtn.addEventListener('pointerdown', (e) => e.preventDefault());
+    this.sendBtn.addEventListener('click', () => this.submit());
     this.input.addEventListener('focus', () => { this.root.classList.add('active'); this.h.onFocusChange?.(true); this._wake(); });
     this.input.addEventListener('blur', () => { this.root.classList.remove('active'); this.h.onFocusChange?.(false); this._wake(); });
 
     this.body = el('div', { class: 'chat-body' }, [this.logAll, this.logWhisper]);
-    this.root = el('div', { class: 'chat' }, [head, this.body, this.input]);
+    this.inputRow = el('div', { class: 'chat-input-row' }, [this.input, this.sendBtn]);
+    this.root = el('div', { class: 'chat' }, [head, this.body, this.inputRow]);
+    // 채팅 내용을 누르면: 모바일은 채팅 열기 + 바로 입력, PC 는 바로 입력
+    this.body.addEventListener('click', (e) => {
+      if (e.target.closest('button, .chat-name')) return;
+      if (this.h.mobile && !this.expanded) this.setExpanded(true);
+      else if (!this.isFocused() && !this.input.disabled) this.focus();
+    });
     this.root.addEventListener('pointerenter', () => this._wake());
     slot.replaceChildren(this.root);
     this._wake();
@@ -100,6 +113,17 @@ export class ChatPanel {
 
   // ── 표시 ───────────────────────────────────────────────
   addMessage(m, { silent = false, prepend = false } = {}) {
+    if (m.type === CHAT_TYPES.GLOBAL || m.type === CHAT_TYPES.WHISPER) {
+      const key = `${m.type}|${m.time}|${m.from}|${m.text}`;
+      if (this.seenKeys.has(key)) return;
+      this.seenKeys.add(key);
+      if (this.seenKeys.size > 2000) this.seenKeys.clear();
+      // 내가 보낸 메시지가 서버를 거쳐 돌아오면, 먼저 보여준 임시 줄을 지움
+      if (m.from === this.selfName && m.type === CHAT_TYPES.GLOBAL) {
+        const i = this.pendingMine.findIndex((pm) => pm.text === m.text);
+        if (i >= 0) { this.pendingMine[i].el.remove(); this.pendingMine.splice(i, 1); }
+      }
+    }
     if (m.id != null) {
       if (this.seenIds.has(m.id)) return;
       this.seenIds.add(m.id);
@@ -195,10 +219,28 @@ export class ChatPanel {
     const text = this.input.value.trim();
     if (text && this.net) {
       if (!this.net.sendChat(text)) this.system('서버와 연결되어 있지 않아 메시지를 보내지 못했습니다.');
+      else if (!text.startsWith('/')) this._echoMine(text);
     }
     // 마인크래프트처럼 보내고 나면 입력창을 닫아 바로 이동할 수 있게 함 (답장은 /r 메시지)
     this.input.value = '';
-    this.blur();
+    // 모바일 채팅 화면에서는 계속 대화하도록 키보드 유지, PC 는 마인크래프트처럼 바로 이동할 수 있게 닫음
+    if (this.expanded && this.h.mobile) this.input.focus();
+    else this.blur();
+  }
+
+  /** 보내자마자 내 화면에 먼저 표시 (서버 확인 전이라 살짝 흐리게) */
+  _echoMine(text) {
+    const line = this._renderLine({ type: CHAT_TYPES.GLOBAL, from: this.selfName, text, time: Date.now() });
+    line.classList.add('pending');
+    this.logAll.append(line);
+    this._scrollBottom(this.logAll);
+    const entry = { text, el: line };
+    this.pendingMine.push(entry);
+    // 서버에서 거절(도배·채팅 금지 등)되면 응답이 안 오므로 잠시 뒤 지움
+    setTimeout(() => {
+      const i = this.pendingMine.indexOf(entry);
+      if (i >= 0) { entry.el.remove(); this.pendingMine.splice(i, 1); }
+    }, 6000);
   }
 
   // ── 이전 기록 ─────────────────────────────────────────
@@ -289,6 +331,8 @@ export class ChatPanel {
     if (!v) this.blur();
     this._scrollBottom(this.tab === 'all' ? this.logAll : this.logWhisper);
     this.h.onExpandChange?.(v);
+    // 모바일: 채팅을 열면 바로 입력 (터치 이벤트 안에서 호출되므로 키보드가 올라옴)
+    if (v && this.h.mobile && !this.input.disabled) this.focus();
   }
 
   // ── 접기 / 흐리게 ─────────────────────────────────────

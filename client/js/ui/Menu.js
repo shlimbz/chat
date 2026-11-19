@@ -69,21 +69,15 @@ export class Menu {
     this.adminBtn = btn('🛡️ 관리자 패널', () => this._show('admin'));
     this.changeBtn = btn('캐릭터 변경', () => this.h.onChangeCharacter?.());
     this.logoutBtn = btn('로그아웃', () => this.h.onLogout?.());
+    // 메뉴는 꼭 필요한 것만 (상점·랭킹은 헬스장 안에 있음)
     return el('div', { class: 'menu-view' }, [
       el('div', { class: 'logo', html: 'ONLINE <span>GYM</span>' }),
       this.accountLine,
       btn('계속하기', () => this.close()),
       btn('캐릭터 정보', () => this._show('info')),
-      btn('캐릭터 꾸미기', () => { this.overlay.classList.add('hidden'); this.h.onCustomize?.(); }),
-      btn('🛍️ 치장 상점', () => { this.overlay.classList.add('hidden'); this.h.onShop?.(); }),
-      btn('🎒 가방 (I)', () => { this.overlay.classList.add('hidden'); this.h.onBag?.(); }),
-      btn('🏆 오늘의 랭킹', () => { this.overlay.classList.add('hidden'); this.h.onRanking?.(); }),
-      btn('접속자 목록', () => this._show('players')),
-      this.adminBtn,
+      btn('🎒 가방', () => { this.overlay.classList.add('hidden'); this.h.onBag?.(); }),
       btn('설정', () => this._show('settings')),
-      btn('운동 기록', null, 'Phase 4 예정'),
-      btn('성장 현황', null, 'Phase 5 예정'),
-      this.changeBtn,
+      this.adminBtn,
       this.logoutBtn,
     ]);
   }
@@ -160,9 +154,12 @@ export class Menu {
 
   _buildInfo() {
     this.infoBody = el('div', { class: 'menu-info' });
+    const sub = (text, fn) => el('button', { class: 'menu-btn', attrs: { type: 'button' }, text, on: { click: fn } });
     return el('div', { class: 'menu-view hidden' }, [
       el('h3', { text: '캐릭터 정보' }),
       this.infoBody,
+      sub('✨ 캐릭터 꾸미기', () => { this.overlay.classList.add('hidden'); this.h.onCustomize?.(); }),
+      this.changeBtn,
       el('button', { class: 'menu-btn', attrs: { type: 'button' }, text: '← 돌아가기', on: { click: () => this._show('main') } }),
     ]);
   }
@@ -172,8 +169,8 @@ export class Menu {
     this.infoBody.replaceChildren(
       row('닉네임', p.nickname),
       row('레벨', 'Lv.1'),
-      row('경험치', '— (Phase 5에서 구현)'),
-      row('운동 기록', '— (Phase 4에서 구현)'),
+      row('코인', p.online ? `🪙 ${(this.h.getWallet?.()?.coins ?? 0).toLocaleString()}` : '-'),
+      row('보유 아이템', p.online ? `${this.h.getWallet?.()?.items?.length ?? 0}개` : '-'),
       row('계정', this.h.getAccount?.()?.username || '-'),
       row('저장 위치', p.online ? '게임 서버' : '이 브라우저 (오프라인 모드)'),
     );
@@ -210,6 +207,8 @@ export class Menu {
     this.fpsInput = el('input', { attrs: { type: 'checkbox' } });
     this.soundInput = el('input', { attrs: { type: 'checkbox' } });
     this.autoResInput = el('input', { attrs: { type: 'checkbox' } });
+    this.fpsCapInput = el('input', { attrs: { type: 'checkbox' } });
+    this.othersFxInput = el('input', { attrs: { type: 'checkbox' } });
     this.keys = { ...DEFAULT_SETTINGS.keys };
     this.keyBtns = {};
     this.keyMsg = el('div', { class: 'menu-hint' });
@@ -224,13 +223,15 @@ export class Menu {
         showFps: this.fpsInput.checked,
         sound: this.soundInput.checked,
         autoRes: this.autoResInput.checked,
+        fpsCap: this.fpsCapInput.checked,
+        othersFx: this.othersFxInput.checked,
         keys: { ...this.keys },
       };
       this.sensValue.textContent = `${s.mouseSensitivity.toFixed(1)}x`;
       this.h.onSettingsChange?.(s);
     };
     this._emitSettings = emit;
-    for (const input of [this.sensInput, this.invertInput, this.nameTagInput, this.fpsInput, this.soundInput, this.autoResInput]) {
+    for (const input of [this.sensInput, this.invertInput, this.nameTagInput, this.fpsInput, this.soundInput, this.autoResInput, this.fpsCapInput, this.othersFxInput]) {
       input.addEventListener('input', emit);
     }
 
@@ -250,6 +251,8 @@ export class Menu {
       el('label', { class: 'menu-row' }, [el('span', { text: '카메라 상하 반전' }), this.invertInput]),
       el('label', { class: 'menu-row' }, [el('span', { text: '닉네임 표시' }), this.nameTagInput]),
       el('label', { class: 'menu-row' }, [el('span', { text: '해상도 자동 조절 (버벅이면 자동으로 낮춤)' }), this.autoResInput]),
+      el('label', { class: 'menu-row' }, [el('span', { text: '30fps 제한 (배터리·발열 절약)' }), this.fpsCapInput]),
+      el('label', { class: 'menu-row' }, [el('span', { text: '다른 사람 트레일·오라 보기' }), this.othersFxInput]),
       el('div', { class: 'menu-row' }, [el('span', { text: '주먹 키' }), this._keyButton('punch')]),
       el('div', { class: 'menu-row' }, [el('span', { text: '발차기 키' }), this._keyButton('kick')]),
       this.keyMsg,
@@ -310,6 +313,8 @@ export class Menu {
     this.fpsInput.checked = s.showFps;
     this.soundInput.checked = s.sound !== false;
     this.autoResInput.checked = s.autoRes !== false;
+    this.fpsCapInput.checked = s.fpsCap ?? !!this.h.isMobile;
+    this.othersFxInput.checked = s.othersFx !== false;
     this.keys = { ...DEFAULT_SETTINGS.keys, ...(s.keys || {}) };
     this._syncKeys();
     this.quality = s.quality;

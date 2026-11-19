@@ -7,12 +7,13 @@ export function kstDay(now = Date.now()) {
 }
 
 export class StatsService {
-  constructor(db, { now = () => Date.now(), cacheMs = 5000 } = {}) {
+  constructor(db, { now = () => Date.now(), cacheMs = 30000 } = {}) {
     this.db = db;
     this.now = now;
     this.cacheMs = cacheMs;
     this.pending = new Map(); // `${day}|${id}` → { day, id, ex, bag }
-    this.cache = null;
+    this.names = new Map();
+    this.dbTop = null;
   }
 
   _slot(id) {
@@ -33,6 +34,7 @@ export class StatsService {
   async flush() {
     const list = [...this.pending.values()].filter((s) => s.ex || s.bag);
     this.pending.clear();
+    this.dbTop = null; // 저장했으니 다음 순위 계산 때 DB 에서 다시 읽음
     for (const s of list) {
       try {
         await this.db.run(
@@ -52,25 +54,38 @@ export class StatsService {
   }
 
   /**
+   * 오늘의 순위 (DB 상위 기록 + 아직 저장 안 된 기록을 합쳐 계산 → DB 를 매번 쓰지 않음)
    * @returns {Promise<{day:string, exercise:{id:number,nickname:string,value:number}[], bag:{...}[]}>}
    */
   async ranking(limit = 10) {
     const now = this.now();
-    if (this.cache && now - this.cache.at < this.cacheMs) return this.cache.data;
-    await this.flush();
     const day = kstDay(now);
-    const q = (col) => this.db.all(
-      `SELECT d.character_id AS id, u.nickname AS nickname, d.${col} AS value
-       FROM daily_stats d JOIN users u ON u.id = d.character_id
-       WHERE d.day = ? AND d.${col} > 0 AND u.deleted_at IS NULL
-       ORDER BY d.${col} DESC, d.character_id ASC LIMIT ?`,
-      [day, limit],
-    );
-    const norm = (rows) => rows.map((r) => ({ id: Number(r.id), nickname: r.nickname, value: Number(r.value) }));
-    const data = { day, exercise: norm(await q('exercise_s')), bag: norm(await q('bag_hits')) };
-    this.cache = { at: now, data };
-    return data;
+    if (!this.dbTop || this.dbTop.day !== day || now - this.dbTop.at >= this.cacheMs) {
+      const q = (col) => this.db.all(
+        `SELECT d.character_id AS id, u.nickname AS nickname, d.${col} AS value
+         FROM daily_stats d JOIN users u ON u.id = d.character_id
+         WHERE d.day = ? AND d.${col} > 0 AND u.deleted_at IS NULL
+         ORDER BY d.${col} DESC, d.character_id ASC LIMIT ?`,
+        [day, limit * 3],
+      );
+      const norm = (rows) => rows.map((r) => ({ id: Number(r.id), nickname: r.nickname, value: Number(r.value) }));
+      this.dbTop = { day, at: now, exercise: norm(await q('exercise_s')), bag: norm(await q('bag_hits')) };
+    }
+    const merge = (base, key) => {
+      const m = new Map(base.map((r) => [r.id, { ...r }]));
+      for (const p of this.pending.values()) {
+        if (p.day !== day || !p[key]) continue;
+        const cur = m.get(p.id);
+        if (cur) cur.value += p[key];
+        else m.set(p.id, { id: p.id, nickname: this.names.get(p.id) || '?', value: p[key] });
+      }
+      return [...m.values()].sort((x, y) => y.value - x.value || x.id - y.id).slice(0, limit);
+    };
+    return { day, exercise: merge(this.dbTop.exercise, 'ex'), bag: merge(this.dbTop.bag, 'bag') };
   }
+
+  /** 접속 중인 캐릭터 이름 (저장 전 기록을 순위에 보여줄 때 사용) */
+  setName(id, nickname) { this.names.set(id, nickname); }
 
   /** 내 오늘 기록 (저장 안 된 것 포함) */
   async mine(characterId) {

@@ -275,3 +275,60 @@ export function createFloorLamp() {
   g.add(shade);
   return { group: g, colliders: [{ minX: -0.2, maxX: 0.2, minZ: -0.2, maxZ: 0.2, top: 1.8 }] };
 }
+
+// ── 치장 상점 가판대 (앞 = +z) ─────────────────────────────
+export function createShopStall() {
+  const g = new THREE.Group();
+  const W = 2.8;
+  // 카운터
+  box(g, W, 0.95, 0.6, '#f4f4f4', 0, 0.475, 0.35);
+  box(g, W + 0.08, 0.06, 0.7, PALETTE.wood, 0, 0.98, 0.35);
+  box(g, W, 0.22, 0.02, '#8e6bd8', 0, 0.7, 0.66);
+  // 뒤 진열장
+  box(g, W, 2.3, 0.35, '#efe6f8', 0, 1.15, -0.45);
+  for (const y of [1.25, 1.75]) box(g, W - 0.1, 0.04, 0.4, PALETTE.wood, 0, y, -0.35);
+  // 기둥 + 줄무늬 차양
+  for (const s of [-1, 1]) box(g, 0.08, 2.6, 0.08, '#2b2d33', s * (W / 2 - 0.04), 1.3, 0.62);
+  const stripes = 7;
+  for (let i = 0; i < stripes; i++) {
+    const x = -W / 2 + (i + 0.5) * (W / stripes);
+    const a = box(g, W / stripes + 0.005, 0.05, 1.25, i % 2 ? '#ffffff' : '#e8505b', x, 2.62, 0.2);
+    a.rotation.x = 0.28;
+  }
+  // 진열 상품 (모자·왕관·선글라스·신발·가방 느낌의 도형)
+  const crown = (x, y) => {
+    cyl(g, 0.12, 0.12, 0.08, '#f2c230', x, y + 0.04, -0.35, 12);
+    for (let i = 0; i < 5; i++) {
+      const a = (i / 5) * Math.PI * 2;
+      const c = new THREE.Mesh(new THREE.ConeGeometry(0.03, 0.08, 5), m('#f2c230'));
+      c.position.set(x + Math.sin(a) * 0.11, y + 0.12, -0.35 + Math.cos(a) * 0.11);
+      g.add(c);
+    }
+  };
+  crown(-0.9, 1.29);
+  sph(g, 0.14, '#3d7dd8', -0.3, 1.29, -0.35, 12).scale.set(1, 0.6, 1); // 모자
+  sph(g, 0.1, '#e8505b', 0.3, 1.36, -0.35, 10); // 비니
+  sph(g, 0.03, '#ffffff', 0.3, 1.47, -0.35, 6);
+  for (const s of [-1, 1]) sph(g, 0.06, '#1d1d22', 0.95 + s * 0.08, 1.33, -0.3, 8).scale.set(1, 0.8, 0.3); // 선글라스
+  box(g, 0.32, 0.26, 0.16, '#3caea3', -0.8, 1.9, -0.35); // 가방
+  for (const s of [-1, 1]) sph(g, 0.08, '#39f28c', 0.05 + s * 0.12, 1.82, -0.32, 8).scale.set(1, 0.6, 1.4); // 운동화
+  sph(g, 0.12, '#ffffff', 0.85, 1.92, -0.38, 10).scale.set(1.4, 0.8, 0.3); // 날개
+  // 계산대 소품
+  box(g, 0.3, 0.18, 0.22, '#2b2d33', 0.9, 1.1, 0.35);
+  cyl(g, 0.08, 0.08, 0.1, '#f6d55c', -0.9, 1.06, 0.4, 10); // 동전 통
+  return {
+    group: g,
+    colliders: [
+      { minX: -W / 2, maxX: W / 2, minZ: -0.65, maxZ: 0.68, top: 2.4 },
+    ],
+  };
+}
+
+/** 천장에 매달린 양면 전광판 틀 (화면은 Gym 에서 캔버스로) */
+export function createHangingBoard(w, h, y, ceiling) {
+  const g = new THREE.Group();
+  box(g, w + 0.24, h + 0.24, 0.16, '#2b2d33', 0, y, 0);
+  box(g, w + 0.3, 0.12, 0.2, '#f6d55c', 0, y - h / 2 - 0.12, 0);
+  for (const s of [-1, 1]) cyl(g, 0.015, 0.015, ceiling - (y + h / 2), '#8a8f99', s * (w / 2 - 0.3), (ceiling + y + h / 2) / 2, 0, 6);
+  return { group: g, colliders: [] };
+}

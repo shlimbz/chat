@@ -42,6 +42,8 @@ export class Game {
     this.profile = welcome?.self?.appearance ? { ...profile, appearance: welcome.self.appearance } : profile;
     profile = this.profile;
     this.wallet = welcome?.self?.wallet || { coins: 0, items: [] };
+    // 서버 시각 첫 추정 (이후 위치 패킷으로 더 정확해짐)
+    this._bootClockOffset = welcome?.serverTime ? performance.now() - welcome.serverTime : 0;
     this.settings = settings;
     this.creator = creator;
     this.network = network;
@@ -93,8 +95,9 @@ export class Game {
     this.player.teleport(start.x, start.z, start.r);
     this.cameraCtl.snapBehind(start.r);
 
-    // 다른 플레이어
+    // 다른 플레이어 (서로 겹치지 않게 충돌)
     this.remotePlayers = new RemotePlayers(this.scene);
+    this.player.getOthers = () => this.remotePlayers.list();
 
     // UI
     this.hud = new HUD(uiRoot);
@@ -119,6 +122,8 @@ export class Game {
       getProfile: () => ({ ...this.profile, online: !!this.network }),
       getAccount: () => this.account,
       getPlayers: () => this._playerList(),
+      isMobile: this.mobile,
+      getWallet: () => this.wallet,
     });
 
     this.shop = new Shop(uiRoot, {
@@ -130,18 +135,17 @@ export class Game {
       online: () => !!this.network?.connected,
       onClose: () => {
         this.hud.setVisible(true);
-        this.touch?.setVisible(!this.chatMode);
+        this.touch?.setVisible(true);
         this._setControlsEnabled(true);
       },
     });
-    this.hud.onCoinClick = () => this.openShop();
+    this.hud.onCoinClick = () => this.hud.toast('🛍️ 치장 상점은 서쪽 벽(레그프레스 옆)에 있어요. 가판대 앞에서 E!', 3200);
     this.hud.onBagClick = () => this.openShop(null, 'inventory');
-    this.hud.onRankClick = () => this.openRanking();
     this.ranking = new RankingPanel(uiRoot, {
       fetch: () => this.network.request(EV.RANKING, null),
       selfId: () => this.selfId,
       onClose: () => {
-        this.touch?.setVisible(!this.chatMode);
+        this.touch?.setVisible(true);
         this._setControlsEnabled(true);
       },
     });
@@ -154,6 +158,7 @@ export class Game {
         onKick: () => this.attack('kick'),
         onInteract: () => this._interact(),
         onChat: () => this.chat.setExpanded(!this.chat.expanded),
+        onBag: () => this.openShop(null, 'inventory'),
         onMenu: () => this._escape(),
       });
     }
@@ -199,8 +204,14 @@ export class Game {
     if (!this.input.enabled || this.chat.isFocused()) return;
     if (!this.player.tryAttack(type)) return;
     this.sfx.swing();
-    this.network?.sendAttack(type);
+    this.network?.sendAttack(type, Math.round(this.serverNow()));
     this._bagCheck(this.player.position, this.player.rotY, type, true);
+  }
+
+  /** 서버 시각 추정 (다른 사람 위치 패킷 기준) — 샌드백 흔들림을 모든 화면에서 같게 */
+  serverNow() {
+    const off = this.remotePlayers?.clockOffset ?? this._bootClockOffset ?? 0;
+    return performance.now() - off;
   }
 
   /** 정면에서 사정거리 안의 샌드백을 실제 타격합니다. */
@@ -208,15 +219,20 @@ export class Game {
     const reach = type === 'kick' ? 1.05 : 0.9;
     const hx = pos.x + Math.sin(rotY) * reach;
     const hz = pos.z + Math.cos(rotY) * reach;
-    const hit = this.gym.hitBag(hx, hz, pos.x, pos.z, rotY, type === 'kick' ? 1.45 : 1);
+    // 판정 시점 = 누른 순간 + 팔/다리가 뻗는 시간 (서버도 같은 기준)
+    const at = this.serverNow() + ATTACKS[type].windupMs;
+    const hit = this.gym.hitBag(hx, hz, pos.x, pos.z, rotY, type === 'kick' ? 1.45 : 1, at);
     if (!hit) return;
-    this.effects.spawn(hit.x, hit.y, hit.z, type === 'kick');
-    // 다른 사람이 친 샌드백은 가까울 때만 소리를 내고, 안내 문구는 내가 처음 쳤을 때 한 번만
-    if (own || this._near(pos, 10)) this.sfx.hit(type === 'kick');
-    if (own && !this._bagHinted) {
-      this._bagHinted = true;
-      this.hud.toast('샌드백 명중! 주먹·발차기로 계속 쳐 보세요 🥊');
+    if (!hit.inZone) {
+      if (own && !this._bagHinted) {
+        this._bagHinted = true;
+        this.hud.toast('바닥 불이 초록색일 때(샌드백이 가운데 올 때) 치면 PERFECT! 🥊', 3500);
+      }
+      return; // 헛방 (결과 문구는 서버 판정이 오면 표시)
     }
+    this.effects.spawn(hit.x, hit.y, hit.z, type === 'kick');
+    // 다른 사람이 친 샌드백은 가까울 때만 소리
+    if (own || this._near(pos, 10)) this.sfx.hit(type === 'kick');
   }
 
   _bindAttackKeys() {
@@ -255,7 +271,10 @@ export class Game {
     this.playerModel.setCastShadow(q.shadows);
     this.playerModel.setBlobShadow(!q.shadows);
     if (this.playerModel.nameTag) this.playerModel.nameTag.visible = this.settings.showNameTags;
-    this.remotePlayers.setRenderOptions({ blobShadow: !q.shadows, castShadow: q.shadows, showNameTags: this.settings.showNameTags });
+    this.remotePlayers.setRenderOptions({
+      blobShadow: !q.shadows, castShadow: q.shadows, showNameTags: this.settings.showNameTags, othersFx: this.settings.othersFx !== false,
+    });
+    this._capFps = this.settings.fpsCap ?? this.mobile; // 30fps 제한 (모바일 기본 켬)
     this.hud.setFpsVisible(this.settings.showFps);
     this._resize();
   }
@@ -310,7 +329,7 @@ export class Game {
     this.touch?.setVisible(false);
     const result = await this.creator.open({ mode: 'edit', profile: this.profile });
     this.hud.setVisible(true);
-    this.touch?.setVisible(!this.chatMode);
+    this.touch?.setVisible(true);
     if (result) {
       this.profile = { ...this.profile, appearance: result.appearance };
       if (!this.network) saveProfile(this.profile);
@@ -349,6 +368,10 @@ export class Game {
       }
       this.remotePlayers.setAppearance(id, appearance);
     });
+    net.on(EV.BAG_RESULT, ({ perfect, coins, type }) => {
+      if (perfect) this.hud.pop(coins > 0 ? `PERFECT! +${coins}🪙` : 'PERFECT!', type === 'kick' ? '#ffb347' : '#5dff9a');
+      else this.hud.pop('MISS', '#ff8a8a');
+    });
     net.on(EV.WALLET, (w) => {
       this._setWallet(w);
       if (w.gained > 0) {
@@ -381,8 +404,11 @@ export class Game {
     net.on(EV.HIT, (h) => this._onHit(h));
 
     // 재접속 성공 → 전체 상태 다시 맞추기
-    clearInterval(this._boardTimer);
-    this._boardTimer = setInterval(() => this._refreshBoard(), 30000);
+    // 랭킹 전광판: 서버가 바뀔 때마다 보내줌 (실시간)
+    net.on(EV.RANKING_LIVE, (data) => {
+      this.gym.setRankingBoard(data);
+      if (this.ranking.isOpen()) this.ranking.refresh();
+    });
     setTimeout(() => this._refreshBoard(), 1500);
     net.on('resync', (w) => {
       this.remotePlayers.reset(w.players);
@@ -488,12 +514,12 @@ export class Game {
   }
 
   /** 모바일 채팅 모드: 채팅창을 크게, 조작 버튼 숨김, 3D 는 저속 렌더링(배터리 절약) */
+  /** 모바일 채팅 화면: 반투명이라 뒤의 게임이 그대로 보이고 계속 그려짐. 💬(🎮) 버튼으로 돌아감 */
   _setChatMode(v) {
     this.chatMode = v;
     document.body.classList.toggle('chat-mode', v);
-    this.touch?.setVisible(!v);
+    this.touch?.setChatMode(v);
     if (v) this.input.clear();
-    this._resize();
   }
 
   _openChat(e, prefill) {
@@ -541,6 +567,9 @@ export class Game {
     }
     const eq = this.nearby;
     if (!eq || this.player.isDown || !this.player.grounded) return;
+    // 운동이 아닌 상호작용: 상점 / 랭킹 전광판
+    if (eq.type === 'shop') { this.openShop(); return; }
+    if (eq.type === 'rankboard') { this.openRanking(); return; }
     if (this._occupant(eq)) {
       this.hud.toast(`다른 사람이 ${eq.type === 'seat' ? '앉아 있어요' : '사용 중이에요'}.`);
       return;
@@ -575,7 +604,7 @@ export class Game {
 
   _spotAt(pos) {
     for (const it of this.gym.interactables) {
-      if (it.type !== 'seat' && Math.hypot(pos.x - it.spot.x, pos.z - it.spot.z) < 0.4) return it;
+      if (it.exercise && it.type !== 'seat' && Math.hypot(pos.x - it.spot.x, pos.z - it.spot.z) < 0.4) return it;
     }
     return null;
   }
@@ -590,11 +619,12 @@ export class Game {
     const fps = a.frames / a.time;
     a.frames = 0;
     a.time = 0;
-    if (fps < 42 && a.pr > 0.55) {
+    const target = this._capFps ? 30 : 60; // 30fps 제한 중이면 30 기준으로 판단
+    if (fps < target * 0.7 && a.pr > 0.55) {
       a.pr = Math.max(0.55, a.pr - 0.1);
       a.good = 0;
       this.renderer.setPixelRatio(a.pr);
-    } else if (fps > 57 && a.pr < a.max) {
+    } else if (fps > target * 0.95 && a.pr < a.max) {
       a.good++;
       if (a.good >= 3) {
         a.pr = Math.min(a.max, a.pr + 0.1);
@@ -619,6 +649,12 @@ export class Game {
   }
 
   _frame() {
+    // 30fps 제한: 화면 주사율(60/120Hz)과 관계없이 약 33ms 마다 한 번만 계산·그리기
+    if (this._capFps) {
+      const now = performance.now();
+      if (now - (this._lastFrameAt || 0) < 1000 / 30 - 4) return;
+      this._lastFrameAt = now;
+    }
     const rawDt = this.clock.getDelta();
     const dt = Math.min(0.05, rawDt);
 
@@ -636,7 +672,7 @@ export class Game {
     this.player.update(dt);
     this.remotePlayers.update(dt);
     this.effects.update(dt);
-    this.gym.update(dt);
+    this.gym.update(dt, this.serverNow());
     this._animateEquipment();
     this.cameraCtl.update(dt, this.player.position);
     this._sendState(dt);
@@ -647,14 +683,16 @@ export class Game {
     this.nearby = this.input.enabled && !act && !this.chat.isFocused() ? this.gym.findNearestInteractable(p.x, p.z, CONFIG.INTERACT_RANGE) : null;
     let prompt = '';
     if (act) prompt = act.it.type === 'seat' ? '일어나기' : `${act.it.label} 그만하기`;
-    else if (this.nearby) prompt = this.nearby.type === 'seat' ? '앉기' : `${this.nearby.label} 운동하기`;
+    else if (this.nearby) {
+      prompt = {
+        seat: '앉기', shop: '🛍️ 상점 열기', rankboard: '🏆 랭킹 자세히',
+      }[this.nearby.type] || `${this.nearby.label} 운동하기`;
+    }
     this.hud.setPrompt(prompt && !this.mobile ? `<kbd>E</kbd> ${prompt}` : '');
     this.touch?.setUseVisible(!!prompt, prompt);
     this.hud.setState(this.playerModel.action, this.player.speed, this._zoneName(p.x, p.z));
 
-    // 채팅 모드에서는 4프레임에 1번만 그림 (배터리 절약, 네트워크/채팅은 그대로 동작)
     this._frameCount++;
-    if (this.chatMode && this._frameCount % 4 !== 0) return;
     this.renderer.render(this.scene, this.camera);
   }
 

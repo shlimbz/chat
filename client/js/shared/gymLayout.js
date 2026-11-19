@@ -27,6 +27,16 @@ export const EQUIPMENT_LAYOUT = [
   { id: 'latpull-3', type: 'latpulldown', x: 17, z: 5, rotY: -Math.PI / 2 },
 ];
 
+/** 치장 상점 가판대 (서쪽 벽, 동쪽을 바라봄). 구매·판매는 이 근처에서만 가능 (서버 확인) */
+export const SHOP = { x: -19.35, z: 10.3, rotY: Math.PI / 2, interactLocal: { x: 0, z: 1.35 } };
+export const SHOP_RANGE = 3.2;
+export function shopPoint() {
+  return localToWorld(SHOP, SHOP.interactLocal.x, SHOP.interactLocal.z);
+}
+
+/** 실시간 랭킹 전광판 (헬스장 한가운데 천장에 매달림, 앞뒤 양면) */
+export const RANK_BOARD = { x: 0, z: 0.4, y: 3.7, w: 5.2, h: 2.4 };
+
 /** 샌드백 위치 */
 export const PUNCHING_BAGS = [
   { id: 'bag-1', x: -1.8, z: 3.1 },

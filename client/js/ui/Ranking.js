@@ -29,10 +29,10 @@ export class RankingPanel {
       ]),
       el('div', { class: 'rank-cols' }, [
         el('div', { class: 'rank-col' }, [el('h3', { text: '💪 운동 시간' }), this.exList]),
-        el('div', { class: 'rank-col' }, [el('h3', { text: '🥊 샌드백 명중' }), this.bagList]),
+        el('div', { class: 'rank-col' }, [el('h3', { text: '🥊 샌드백 PERFECT' }), this.bagList]),
       ]),
       this.meEl,
-      el('div', { class: 'shop-earn', text: '기구 운동 중인 시간과 샌드백을 정면에서 맞힌 횟수를 서버가 세어요. 매일 자정(한국 시간)에 새로 시작합니다.' }),
+      el('div', { class: 'shop-earn', text: '기구 운동 중인 시간과, 샌드백이 가운데(바닥 초록 불)에 왔을 때 맞힌 PERFECT 횟수를 서버가 세어요. 매일 자정(한국 시간)에 새로 시작합니다.' }),
     ]);
     this.overlay = el('div', { id: 'ranking', class: 'overlay dim hidden' }, [panel]);
     this.overlay.addEventListener('pointerdown', (e) => { if (e.target === this.overlay) this.close(); });

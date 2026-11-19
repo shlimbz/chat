@@ -81,6 +81,42 @@ export class PlayerController {
     this.teleport(a.exit.x, a.exit.z, this.rotY);
   }
 
+  /**
+   * 다른 캐릭터와의 충돌.
+   * - 내가 상대 쪽으로 걸어가면 막힘(벽처럼), 상대가 나에게 들어오면 부드럽게 밀려남
+   *   → 각자 자기 화면에서 이렇게 처리하므로, 서로 부딪히면 걷는 쪽이 상대를 천천히 밀고 가는 느낌
+   * - 기구 운동 중이거나 앉아 있는 사람, 머리 위로 점프해 넘는 경우는 제외
+   * @returns {boolean} 위치가 바뀌었는지
+   */
+  _separateFromPlayers(dt) {
+    const PUSH_DEPTH = 0.18;
+    const others = this.getOthers?.();
+    if (!others || !others.length) return false;
+    const minD = CONFIG.PLAYER_RADIUS * 1.8;
+    let changed = false;
+    for (const o of others) {
+      if (o.model?.exercise || !o.visible) continue;
+      const p = o.pos;
+      if (Math.abs(p.y - this.position.y) > 0.9) continue;
+      let dx = this.position.x - p.x;
+      let dz = this.position.z - p.z;
+      let d = Math.hypot(dx, dz);
+      if (d >= minD) continue;
+      if (d < 1e-4) { dx = Math.sin(this.rotY + 1.7); dz = Math.cos(this.rotY + 1.7); d = 1; }
+      const nx = dx / d;
+      const nz = dz / d;
+      const overlap = minD - Math.min(d, minD);
+      // 내가 상대 쪽으로 움직이는 중이면 완전히 막고, 아니면(상대가 밀고 들어옴) 조금씩 밀려남
+      const towards = (this.velocity.x * -nx + this.velocity.z * -nz) > 0.2;
+      // 밀고 들어갈 때는 살짝(최대 PUSH_DEPTH)만 파고들 수 있음 → 상대 화면에서는 그만큼 겹쳐 보여 상대가 밀려남
+      const push = towards ? Math.max(0, overlap - PUSH_DEPTH) : overlap * Math.min(1, dt * 9);
+      this.position.x += nx * push;
+      this.position.z += nz * push;
+      changed = true;
+    }
+    return changed;
+  }
+
   teleport(x, z, rotY = this.rotY, y = 0) {
     this.position.x = x;
     this.position.z = z;
@@ -164,6 +200,8 @@ export class PlayerController {
     this.position.x += (this.velocity.x + this.knock.x) * dt;
     this.position.z += (this.velocity.z + this.knock.z) * dt;
     this.collision.resolveCircle(this.position, CONFIG.PLAYER_RADIUS, this.position.y);
+    // 다른 사람과 겹치지 않게 (밀기/밀리기). 그 뒤 벽·기구 충돌을 한 번 더 확인
+    if (this._separateFromPlayers(dt)) this.collision.resolveCircle(this.position, CONFIG.PLAYER_RADIUS, this.position.y);
 
     // 실제 이동한 거리 기준 속도 (벽에 막히면 걷는 모션도 줄어듦)
     const moved = Math.hypot(this.position.x - prevX, this.position.z - prevZ);

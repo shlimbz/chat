@@ -126,10 +126,12 @@ for (const [name, makeDb] of Object.entries(BACKENDS)) {
     const st = new StatsService(db, { now: () => now, cacheMs: 0 });
     st.addExercise(ids[0], 30); st.addExercise(ids[1], 90); st.addBagHit(ids[2], 5); st.addBagHit(ids[0], 2);
     await st.flush();
-    st.addExercise(ids[0], 100); // 저장 전에도 랭킹에 반영
+    st.addExercise(ids[0], 100); // 저장 전에도 랭킹에 반영 (DB 를 쓰지 않고 합쳐서 계산)
+    st.setName(ids[2], '다다');
+    st.addExercise(ids[2], 5); // DB 에 아직 없는 사람도 이름과 함께 표시
     const r = await st.ranking(10);
     assert.equal(r.day, '2026-11-19');
-    assert.deepEqual(r.exercise.map((x) => [x.nickname, x.value]), [['가가', 130], ['나나', 90]]);
+    assert.deepEqual(r.exercise.map((x) => [x.nickname, x.value]), [['가가', 130], ['나나', 90], ['다다', 5]]);
     assert.deepEqual(r.bag.map((x) => [x.nickname, x.value]), [['다다', 5], ['가가', 2]]);
     st.addBagHit(ids[1]);
     assert.deepEqual(await st.mine(ids[1]), { exercise: 90, bag: 1 });

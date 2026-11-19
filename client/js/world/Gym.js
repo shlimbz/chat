@@ -3,7 +3,10 @@ import * as THREE from 'three';
 import { CollisionWorld } from './CollisionWorld.js';
 import { findPunchingBagTarget } from './bagCollision.js';
 import { batchStatic } from './StaticBatcher.js';
-import { EQUIPMENT_LAYOUT, PUNCHING_BAGS } from '../shared/gymLayout.js';
+import {
+  EQUIPMENT_LAYOUT, PUNCHING_BAGS, SHOP, RANK_BOARD,
+} from '../shared/gymLayout.js';
+import { bagAngle, bagInZone } from '../shared/bagMotion.js';
 import {
   createBenchPress, createDumbbellRack, createTreadmill, createLegPress, createShoulderPress,
   createLatPulldown, createRestBench, createWaterCooler, createPlant, createVendingMachine,
@@ -13,7 +16,7 @@ import { EQUIPMENT_TYPES } from '../shared/equipmentTypes.js';
 import {
   createReceptionDesk, createPlateTree, createKettlebellRow, createStretchZone, createPunchingBag, createLockers,
   createTowelShelf, createWallClock, createSpeaker, createFloorTrack, createPoster,
-  createSofa, createArmchair, createCoffeeTable, createRug, createFloorLamp,
+  createSofa, createArmchair, createCoffeeTable, createRug, createFloorLamp, createShopStall, createHangingBoard,
 } from './decor.js';
 
 export const GYM_SIZE = { width: 40, depth: 30, height: 5 };
@@ -196,7 +199,7 @@ export class Gym {
     const winMat = new THREE.MeshBasicMaterial({ color: '#add8ec' });
     const frameMat = m('#f8fafc');
     // 서쪽 벽 글씨(FREE WEIGHT z=-6~-2, MACHINE z=5.4~8.6)와 겹치지 않는 위치
-    for (const z of [-10, 1.5, 11.5]) {
+    for (const z of [-10, 1.5]) {
       for (const side of [-1, 1]) {
         if (side === 1 && z !== -10) continue; // 동쪽은 랫풀다운·자판기 뒤라 하나만
         const wf = new THREE.Mesh(new THREE.BoxGeometry(0.06, 1.6, 3.0), frameMat);
@@ -253,23 +256,24 @@ export class Gym {
     this.root.add(mesh);
   }
 
-  /** 라운지 벽의 랭킹 전광판 (캔버스에 그려서 30초마다 갱신 → 그리기 비용 거의 없음) */
-  _buildRankingBoard(x, y, z, rotY) {
+  /** 천장에 매달린 양면 랭킹 전광판 (캔버스에 그려서 갱신될 때만 다시 그림 → 비용 거의 없음) */
+  _buildRankingBoard() {
+    const B = RANK_BOARD;
     const canvas = document.createElement('canvas');
-    canvas.width = 768;
-    canvas.height = 448;
+    canvas.width = 1024;
+    canvas.height = 472;
     this.rankCanvas = canvas;
     this.rankTex = new THREE.CanvasTexture(canvas);
     this.rankTex.colorSpace = THREE.SRGBColorSpace;
-    const frame = new THREE.Mesh(new THREE.BoxGeometry(3.5, 2.1, 0.08), m('#2b2d33'));
-    frame.position.set(x, y, z + 0.05);
-    frame.rotation.y = rotY;
-    this.root.add(frame);
-    const board = new THREE.Mesh(new THREE.PlaneGeometry(3.3, 1.92), new THREE.MeshBasicMaterial({ map: this.rankTex }));
-    board.position.set(x, y, z);
-    board.rotation.y = rotY;
-    board.userData.noBatch = true;
-    this.root.add(board);
+    this._place(createHangingBoard(B.w, B.h, B.y, GYM_SIZE.height), B.x, B.z, 0, '');
+    const mat = new THREE.MeshBasicMaterial({ map: this.rankTex });
+    for (const side of [1, -1]) {
+      const board = new THREE.Mesh(new THREE.PlaneGeometry(B.w, B.h), mat);
+      board.position.set(B.x, B.y, B.z + side * 0.085);
+      board.rotation.y = side > 0 ? 0 : Math.PI;
+      board.userData.noBatch = true;
+      this.root.add(board);
+    }
     this.setRankingBoard(null);
   }
 
@@ -281,33 +285,33 @@ export class Gym {
     g.fillStyle = '#16202c';
     g.fillRect(0, 0, c.width, c.height);
     g.fillStyle = '#ffd84a';
-    g.font = 'bold 44px "Apple SD Gothic Neo", "Malgun Gothic", sans-serif';
+    g.font = 'bold 50px "Apple SD Gothic Neo", "Malgun Gothic", sans-serif';
     g.textAlign = 'center';
     g.textBaseline = 'middle';
-    g.fillText('🏆 오늘의 랭킹', c.width / 2, 40);
+    g.fillText('🏆 오늘의 랭킹 (실시간)', c.width / 2, 44);
     const col = (title, rows, fmt, cx) => {
       g.fillStyle = '#7fe3d4';
-      g.font = 'bold 30px "Apple SD Gothic Neo", "Malgun Gothic", sans-serif';
+      g.font = 'bold 36px "Apple SD Gothic Neo", "Malgun Gothic", sans-serif';
       g.textAlign = 'center';
-      g.fillText(title, cx, 104);
-      g.font = '27px "Apple SD Gothic Neo", "Malgun Gothic", sans-serif';
+      g.fillText(title, cx, 112);
+      g.font = 'bold 34px "Apple SD Gothic Neo", "Malgun Gothic", sans-serif';
       if (!rows || !rows.length) {
         g.fillStyle = '#8a96a3';
         g.fillText(data ? '아직 기록 없음' : '서버 연결 시 표시', cx, 200);
         return;
       }
       rows.slice(0, 5).forEach((r, i) => {
-        const yy = 156 + i * 54;
+        const yy = 172 + i * 60;
         g.fillStyle = i === 0 ? '#ffd84a' : i === 1 ? '#d9dee5' : i === 2 ? '#e3a36b' : '#ffffff';
         g.textAlign = 'left';
-        g.fillText(`${i + 1}. ${String(r.nickname).slice(0, 8)}`, cx - 160, yy);
+        g.fillText(`${i + 1}. ${String(r.nickname).slice(0, 8)}`, cx - 215, yy);
         g.textAlign = 'right';
-        g.fillText(fmt(r.value), cx + 165, yy);
+        g.fillText(fmt(r.value), cx + 215, yy);
       });
     };
     const fmtS = (s) => (s >= 3600 ? `${Math.floor(s / 3600)}h ${Math.floor((s % 3600) / 60)}m` : `${Math.floor(s / 60)}m ${s % 60}s`);
     col('💪 운동 시간', data?.exercise, fmtS, c.width * 0.27);
-    col('🥊 샌드백', data?.bag, (v) => `${v}회`, c.width * 0.73);
+    col('🥊 샌드백 PERFECT', data?.bag, (v) => `${v}회`, c.width * 0.73);
     g.strokeStyle = '#2f3d4d';
     g.lineWidth = 3;
     g.beginPath();
@@ -486,30 +490,45 @@ export class Gym {
   }
 
   /** 플레이어가 바라보는 방향·사정거리·타격 위치가 모두 맞을 때만 샌드백을 타격합니다. */
-  hitBag(hitX, hitZ, fromX, fromZ, rotY = 0, strength = 1) {
+  hitBag(hitX, hitZ, fromX, fromZ, rotY = 0, strength = 1, serverMs = performance.now()) {
     const target = findPunchingBagTarget(this.punchingBags, {
       hitX, hitZ, fromX, fromZ, rotY,
     });
     if (!target) return null;
-
-    const dx = target.worldX - fromX;
-    const dz = target.worldZ - fromZ;
-    const d = Math.hypot(dx, dz) || 1;
-    const impulse = 2.2 * Math.max(0.65, Math.min(1.6, strength));
-    target.vx += (dx / d) * impulse;
-    target.vz += (dz / d) * impulse;
-    target.lastHitAt = performance.now();
-    return { x: target.worldX, y: 1.0, z: target.worldZ, strength };
+    // 샌드백이 가운데(초록 불)에 있을 때만 실제로 맞음. 옆으로 가 있으면 헛방
+    const inZone = bagInZone(target.idx, serverMs);
+    if (inZone) {
+      const dx = target.worldX - fromX;
+      const dz = target.worldZ - fromZ;
+      const d = Math.hypot(dx, dz) || 1;
+      const impulse = 2.2 * Math.max(0.65, Math.min(1.6, strength));
+      target.vx += (dx / d) * impulse;
+      target.vz += (dz / d) * impulse;
+      target.lastHitAt = performance.now();
+    }
+    return {
+      x: target.worldX + Math.sin(target.baseAngle || 0) * 1.62, y: 1.0, z: target.worldZ, strength, idx: target.idx, inZone,
+    };
   }
 
-  update(dt) {
+  /**
+   * @param {number} dt
+   * @param {number} serverMs 서버 시각 (모든 화면에서 샌드백이 같은 위치에 있도록)
+   */
+  update(dt, serverMs = performance.now()) {
     for (const bag of this.punchingBags || []) {
+      const inZone = bagInZone(bag.idx, serverMs);
+      if (inZone !== bag.lit) {
+        bag.lit = inZone;
+        bag.light.material.color.set(inZone ? '#39f28c' : '#3a3f4b');
+      }
+      bag.baseAngle = bagAngle(bag.idx, serverMs);
       // 진자 운동 (스프링 + 감쇠)
       bag.vx += (-bag.ax * 18 - bag.vx * 2.2) * dt;
       bag.vz += (-bag.az * 18 - bag.vz * 2.2) * dt;
       bag.ax += bag.vx * dt;
       bag.az += bag.vz * dt;
-      bag.swing.rotation.z = -bag.ax * 0.35;
+      bag.swing.rotation.z = -bag.baseAngle - bag.ax * 0.35;
       bag.swing.rotation.x = bag.az * 0.35;
     }
   }
@@ -529,7 +548,17 @@ export class Gym {
     this._placeSofa(createArmchair('#f9a03f'), LX - 2.0, LZ, Math.PI / 2, 'lounge-chair-1');
     this._placeSofa(createArmchair('#f9a03f'), LX + 2.0, LZ, -Math.PI / 2, 'lounge-chair-2');
     for (const [x, z] of [[LX - 2.1, LZ + 1.85], [LX + 2.1, LZ - 1.85]]) this._place(createFloorLamp(), x, z, 0, 'lamp');
-    this._buildRankingBoard(LX, 2.25, GYM_SIZE.depth / 2 - 0.04, Math.PI);
+    // 치장 상점 가판대 (서쪽 벽) — E 로 상점 열기
+    this._place(createShopStall(), SHOP.x, SHOP.z, SHOP.rotY, 'shop');
+    this._addInteractable({
+      id: 'shop', type: 'shop', x: SHOP.x, z: SHOP.z, rotY: SHOP.rotY, interactPoint: SHOP.interactLocal,
+    });
+    this._wallText('🛍️ 치장 상점 SHOP', -GYM_SIZE.width / 2 + 0.03, 3.25, SHOP.z, Math.PI / 2, 3.0, 0.6, '#8e6bd8', '#ffffff');
+    // 헬스장 한가운데 천장에 매달린 실시간 랭킹 전광판 (앞뒤 양면) — 아래에서 E 로 자세히 보기
+    this._buildRankingBoard();
+    this._addInteractable({
+      id: 'rankboard', type: 'rankboard', x: RANK_BOARD.x, z: RANK_BOARD.z, rotY: 0, interactPoint: { x: 0, z: 0 },
+    });
     // 입구 쪽 대기 벤치 (앞/뒤 양쪽으로 앉기)
     this._placeBench(2.6, -11, 13.2, 0, 'rest-bench-1');
     this._placeBench(2.6, -7.6, 13.2, 0, 'rest-bench-2');
@@ -562,13 +591,18 @@ export class Gym {
     // 중앙에는 스트레칭 매트와 2개의 샌드백을 둬 대기 없이 교대로 연습할 수 있게 합니다.
     this._place(createStretchZone(), 3.6, -2.6, 0, 'stretch');
     this.punchingBags = [];
-    for (const { id, x, z } of PUNCHING_BAGS) {
+    PUNCHING_BAGS.forEach(({ id, x, z }, idx) => {
       const bag = this._place(createPunchingBag(), x, z, 0, id);
+      // 바닥 신호등: 샌드백이 가운데(퍼펙트 구간)에 오면 초록색으로 켜짐
+      const light = new THREE.Mesh(new THREE.CylinderGeometry(0.42, 0.42, 0.012, 24), new THREE.MeshBasicMaterial({ color: '#3a3f4b' }));
+      light.position.set(x, 0.045, z);
+      light.userData.noBatch = true;
+      this.root.add(light);
       this.punchingBags.push({
-        swing: bag.swing, worldX: x, worldZ: z,
+        idx, swing: bag.swing, worldX: x, worldZ: z, light, lit: false,
         ax: 0, az: 0, vx: 0, vz: 0, lastHitAt: 0,
       });
-    }
+    });
 
     // 사물함과 보급품은 벽 쪽으로 붙여 중앙 운동 동선에 간섭하지 않게 합니다.
     this._place(createLockers(6), -14.8, D - 0.55, Math.PI, 'lockers');

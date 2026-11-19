@@ -5,6 +5,13 @@
 // - 💬 버튼: 채팅 모드 (채팅창을 크게, 3D 는 절전)
 import { el } from './dom.js';
 
+/** 발차기 버튼 아이콘: 발바닥 */
+const FOOT_SVG = `<svg viewBox="0 0 24 24" width="38" height="38" aria-label="발차기" fill="currentColor">
+  <path d="M10.6 9.2c3 0 4.6 2.3 4.2 5.4-.4 3-1.6 4.2-1.7 6-.1 1.5-1.2 2.3-2.7 2.3-2 0-3.3-1.3-3.1-3.3.2-2.1 1-2.9.6-5-.5-2.9.5-5.4 2.7-5.4z"/>
+  <circle cx="14.4" cy="6.9" r="1.75"/><circle cx="11.9" cy="4.7" r="1.35"/><circle cx="9.4" cy="4.1" r="1.2"/>
+  <circle cx="7.1" cy="4.8" r="1.05"/><circle cx="5.5" cy="6.6" r="0.95"/>
+</svg>`;
+
 export function isMobile() {
   return window.matchMedia('(pointer: coarse)').matches || /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
 }
@@ -43,8 +50,8 @@ export class TouchControls {
     this.base = el('div', { class: 'joy-base' }, [this.knob]);
     this.joy = el('div', { class: 'joy-zone' }, [this.base]);
 
-    const btn = (cls, label, fn) => {
-      const b = el('button', { class: `tbtn ${cls}`, attrs: { type: 'button' }, text: label });
+    const btn = (cls, label, fn, html = null) => {
+      const b = el('button', { class: `tbtn ${cls}`, attrs: { type: 'button' }, ...(html ? { html } : { text: label }) });
       b.addEventListener('pointerdown', (e) => { e.preventDefault(); e.stopPropagation(); fn(); b.classList.add('down'); });
       const up = () => b.classList.remove('down');
       b.addEventListener('pointerup', up);
@@ -54,13 +61,16 @@ export class TouchControls {
     };
     this.useBtn = btn('tbtn-use hidden', '이용', h.onInteract);
     this.buttons = el('div', { class: 'tbtns' }, [
-      btn('tbtn-kick', '🦵', h.onKick),
+      btn('tbtn-kick', '', h.onKick, FOOT_SVG),
       btn('tbtn-punch', '👊', h.onPunch),
       btn('tbtn-jump', '점프', h.onJump),
       this.useBtn,
     ]);
+    // 오른쪽 위: 채팅(누르면 채팅 열기/닫기) · 가방 · 메뉴
+    this.chatBtn = btn('tbtn-small tbtn-chat', '💬', h.onChat);
     this.topBtns = el('div', { class: 'ttop' }, [
-      btn('tbtn-small', '💬', h.onChat),
+      this.chatBtn,
+      btn('tbtn-small', '🎒', h.onBag),
       btn('tbtn-small', '☰', h.onMenu),
     ]);
     this.root = el('div', { class: 'touch-ui' }, [this.joy, this.buttons, this.topBtns]);
@@ -71,6 +81,13 @@ export class TouchControls {
   setVisible(v) {
     this.root.classList.toggle('hidden', !v);
     if (!v) this._release();
+  }
+
+  /** 채팅 중: 조이스틱·공격 버튼은 숨기고 오른쪽 위 버튼(💬 로 돌아가기)은 남김 */
+  setChatMode(v) {
+    this.root.classList.toggle('chatting', v);
+    this.chatBtn.textContent = v ? '🎮' : '💬';
+    if (v) this._release();
   }
 
   setUseVisible(v, label = '이용') {

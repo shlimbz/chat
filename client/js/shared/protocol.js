@@ -1,7 +1,7 @@
 // 클라이언트 ↔ 서버 통신 규약 (양쪽이 같은 파일을 import)
 // 이벤트 이름과 값의 범위를 한곳에서 관리합니다.
 
-export const PROTOCOL_VERSION = 5;
+export const PROTOCOL_VERSION = 7;
 
 export const EV = {
   // 서버 → 클라이언트
@@ -18,7 +18,7 @@ export const EV = {
   WALLET: 'wallet', // { coins, items, gained?, reason? }  내 코인/보유 아이템 (벌거나 쓸 때마다)
   // 클라이언트 → 서버
   MOVE: 'move', // [x, y, z, r, actionIndex]
-  ATTACK: 'attack', // 'punch' | 'kick'
+  ATTACK: 'attack', // { type: 'punch'|'kick', t: 내 화면의 서버 시각 } (예전 형식: 문자열)
   SET_APPEARANCE: 'appearance:set', // appearance
   CHAT_SEND: 'chat:send', // text  (명령어 포함, 서버가 해석)
   CHAT_HISTORY: 'chat:history', // { beforeId } → ack(ChatMessage[])
@@ -28,6 +28,8 @@ export const EV = {
   PING: 'net:ping', // 클라이언트 시각 → ack(같은 값)  (핑 측정)
   SHOP_BUY: 'shop:buy', // itemId → ack({ ok, message, coins, items })
   SHOP_SELL: 'shop:sell', // itemId → ack({ ok, message, coins, items })
+  BAG_RESULT: 'bag:result', // 서버 → 친 사람: { bag, perfect, coins }
+  RANKING_LIVE: 'ranking:live', // 서버 → 전체: { day, exercise, bag } (바뀌었을 때만, 최대 5초마다)
   RANKING: 'ranking', // → ack({ day, exercise:[{id,nickname,value}], bag:[...], me:{id, exercise, bag} })
 };
 

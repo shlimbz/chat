@@ -159,6 +159,23 @@ export class ChatService {
     return this._save(CHAT_TYPES.WHISPER, sender, receiver, text);
   }
 
+  /**
+   * 빠른 전송용: 메시지를 바로 만들어 돌려주고(먼저 보내기), DB 저장은 뒤에서 진행
+   * → 원격 DB(Turso) 왕복을 기다리지 않아 채팅이 바로 보임. id 는 저장 후 기록 조회 때 생김
+   * @returns {{msg:object, saved:Promise<void>}}
+   */
+  post(type, sender, receiver, text) {
+    const now = Date.now();
+    const msg = {
+      id: null, type, from: sender.nickname, to: receiver ? receiver.nickname : null, text, time: now, admin: !!sender.admin,
+    };
+    const saved = this.db.run(
+      'INSERT INTO chat_messages (type, sender_id, receiver_id, message, created_at) VALUES (?, ?, ?, ?, ?)',
+      [type, sender.id, receiver ? receiver.id : null, text, now],
+    ).then(() => {});
+    return { msg, saved };
+  }
+
   async globalHistory(beforeId, limit = CHAT_PAGE_SIZE) {
     const rows = await this.db.all(
       `${SELECT} WHERE m.type = 'global' AND m.id < ? ORDER BY m.id DESC LIMIT ?`,
