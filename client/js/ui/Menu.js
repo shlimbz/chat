@@ -13,7 +13,8 @@ export class Menu {
     this.settingsView = this._buildSettings();
     this.infoView = this._buildInfo();
     this.playersView = this._buildPlayers();
-    this.panel = el('div', { class: 'menu-panel' }, [this.mainView, this.settingsView, this.infoView, this.playersView]);
+    this.adminView = this._buildAdmin();
+    this.panel = el('div', { class: 'menu-panel' }, [this.mainView, this.settingsView, this.infoView, this.playersView, this.adminView]);
     this.overlay = el('div', { id: 'menu', class: 'overlay dim hidden' }, [this.panel]);
     this.overlay.addEventListener('pointerdown', (e) => { if (e.target === this.overlay) this.close(); });
     root.append(this.overlay);
@@ -22,6 +23,7 @@ export class Menu {
   isOpen() { return !this.overlay.classList.contains('hidden'); }
 
   open() {
+    this._syncMain();
     this._show('main');
     this.overlay.classList.remove('hidden');
   }
@@ -44,6 +46,8 @@ export class Menu {
     this.settingsView.classList.toggle('hidden', name !== 'settings');
     this.infoView.classList.toggle('hidden', name !== 'info');
     this.playersView.classList.toggle('hidden', name !== 'players');
+    this.adminView.classList.toggle('hidden', name !== 'admin');
+    if (name === 'admin') this._syncAdmin();
     if (name === 'settings') this._syncSettings();
     if (name === 'info') this._syncInfo();
     if (name === 'players') this._syncPlayers();
@@ -60,16 +64,94 @@ export class Menu {
       }
       return b;
     };
+    this.accountLine = el('div', { class: 'menu-account' });
+    this.adminBtn = btn('🛡️ 관리자 패널', () => this._show('admin'));
+    this.changeBtn = btn('캐릭터 변경', () => this.h.onChangeCharacter?.());
+    this.logoutBtn = btn('로그아웃', () => this.h.onLogout?.());
     return el('div', { class: 'menu-view' }, [
       el('div', { class: 'logo', html: 'ONLINE <span>GYM</span>' }),
+      this.accountLine,
       btn('계속하기', () => this.close()),
       btn('캐릭터 정보', () => this._show('info')),
-      btn('캐릭터 커스터마이징', () => { this.overlay.classList.add('hidden'); this.h.onCustomize?.(); }),
+      btn('캐릭터 꾸미기', () => { this.overlay.classList.add('hidden'); this.h.onCustomize?.(); }),
+      btn('접속자 목록', () => this._show('players')),
+      this.adminBtn,
       btn('설정', () => this._show('settings')),
       btn('운동 기록', null, 'Phase 4 예정'),
       btn('성장 현황', null, 'Phase 5 예정'),
-      btn('접속자 목록', () => this._show('players')),
+      this.changeBtn,
+      this.logoutBtn,
     ]);
+  }
+
+  _syncMain() {
+    const acc = this.h.getAccount?.();
+    this.accountLine.textContent = acc ? `👤 ${acc.username}${acc.isAdmin ? ' · 관리자' : ''}` : '오프라인 모드';
+    this.adminBtn.classList.toggle('hidden', !acc?.isAdmin);
+    this.changeBtn.classList.toggle('hidden', !this.h.onChangeCharacter);
+    this.logoutBtn.classList.toggle('hidden', !this.h.onLogout);
+  }
+
+  // ── 관리자 패널 ───────────────────────────────────────
+  _buildAdmin() {
+    this.adminMsg = el('div', { class: 'menu-hint admin-msg' });
+    this.adminList = el('div', { class: 'menu-players' });
+    this.noticeInput = el('input', { class: 'menu-input', attrs: { type: 'text', maxlength: '200', placeholder: '전체 공지 내용' } });
+    const noticeBtn = el('button', { class: 'chip', attrs: { type: 'button' }, text: '공지', on: { click: () => this._doAdmin('notice', null, { text: this.noticeInput.value }).then(() => { this.noticeInput.value = ''; }) } });
+    this.unbanInput = el('input', { class: 'menu-input', attrs: { type: 'text', maxlength: '16', placeholder: '차단 해제할 계정 아이디' } });
+    const unbanBtn = el('button', { class: 'chip', attrs: { type: 'button' }, text: '해제', on: { click: () => this._doAdmin('unban', this.unbanInput.value.trim()) } });
+    return el('div', { class: 'menu-view hidden' }, [
+      el('h3', { text: '🛡️ 관리자 패널' }),
+      el('div', { class: 'menu-hint', text: '채팅 명령어도 사용 가능: /help' }),
+      this.adminList,
+      el('div', { class: 'menu-inline' }, [this.noticeInput, noticeBtn]),
+      el('div', { class: 'menu-inline' }, [this.unbanInput, unbanBtn]),
+      this.adminMsg,
+      el('button', { class: 'menu-btn', attrs: { type: 'button' }, text: '← 돌아가기', on: { click: () => this._show('main') } }),
+    ]);
+  }
+
+  _syncAdmin() {
+    const list = (this.h.getPlayers?.() || []).filter((p) => !p.self);
+    this.adminMsg.textContent = '';
+    if (!list.length) {
+      this.adminList.replaceChildren(el('div', { class: 'menu-hint', text: '다른 접속자가 없습니다.' }));
+      return;
+    }
+    this.adminList.replaceChildren(...list.map((p) => {
+      const row = el('div', { class: 'menu-info-row admin-row' }, [el('b', { text: p.admin ? `★ ${p.nickname}` : p.nickname })]);
+      if (!p.admin) {
+        const actions = el('span', { class: 'admin-actions' });
+        const act = (label, action, extra, confirmText) => {
+          const b = el('button', { class: 'chip', attrs: { type: 'button' }, text: label });
+          b.addEventListener('click', () => {
+            if (confirmText && b.dataset.confirm !== '1') {
+              b.dataset.confirm = '1';
+              b.textContent = confirmText;
+              setTimeout(() => { b.dataset.confirm = ''; b.textContent = label; }, 3000);
+              return;
+            }
+            this._doAdmin(action, p.nickname, extra);
+          });
+          return b;
+        };
+        actions.append(
+          act('뮤트', 'mute', { minutes: 10 }),
+          act('추방', 'kick', {}, '추방?'),
+          act('차단', 'ban', {}, '차단?'),
+          act('삭제', 'delchar', {}, '삭제?'),
+        );
+        row.append(actions);
+      }
+      return row;
+    }));
+  }
+
+  async _doAdmin(action, target, extra = {}) {
+    this.adminMsg.textContent = '처리 중…';
+    const r = await this.h.onAdmin?.(action, target, extra);
+    this.adminMsg.textContent = r?.message || '';
+    if (r?.ok) setTimeout(() => { if (this.current === 'admin') this._syncAdmin(); this.adminMsg.textContent = r.message; }, 400);
   }
 
   _buildInfo() {
@@ -88,6 +170,7 @@ export class Menu {
       row('레벨', 'Lv.1'),
       row('경험치', '— (Phase 5에서 구현)'),
       row('운동 기록', '— (Phase 4에서 구현)'),
+      row('계정', this.h.getAccount?.()?.username || '-'),
       row('저장 위치', p.online ? '게임 서버' : '이 브라우저 (오프라인 모드)'),
     );
   }
@@ -121,6 +204,7 @@ export class Menu {
     this.invertInput = el('input', { attrs: { type: 'checkbox' } });
     this.nameTagInput = el('input', { attrs: { type: 'checkbox' } });
     this.fpsInput = el('input', { attrs: { type: 'checkbox' } });
+    this.soundInput = el('input', { attrs: { type: 'checkbox' } });
     this.quality = 'medium';
 
     const emit = () => {
@@ -130,11 +214,12 @@ export class Menu {
         quality: this.quality,
         showNameTags: this.nameTagInput.checked,
         showFps: this.fpsInput.checked,
+        sound: this.soundInput.checked,
       };
       this.sensValue.textContent = `${s.mouseSensitivity.toFixed(1)}x`;
       this.h.onSettingsChange?.(s);
     };
-    for (const input of [this.sensInput, this.invertInput, this.nameTagInput, this.fpsInput]) {
+    for (const input of [this.sensInput, this.invertInput, this.nameTagInput, this.fpsInput, this.soundInput]) {
       input.addEventListener('input', emit);
     }
 
@@ -153,6 +238,7 @@ export class Menu {
       el('label', { class: 'menu-row' }, [el('span', { text: '마우스 감도' }), this.sensInput, this.sensValue]),
       el('label', { class: 'menu-row' }, [el('span', { text: '카메라 상하 반전' }), this.invertInput]),
       el('label', { class: 'menu-row' }, [el('span', { text: '닉네임 표시' }), this.nameTagInput]),
+      el('label', { class: 'menu-row' }, [el('span', { text: '효과음' }), this.soundInput]),
       el('label', { class: 'menu-row' }, [el('span', { text: 'FPS 표시' }), this.fpsInput]),
       el('button', { class: 'menu-btn', attrs: { type: 'button' }, text: '← 돌아가기', on: { click: () => this._show('main') } }),
     ]);
@@ -169,6 +255,7 @@ export class Menu {
     this.invertInput.checked = s.invertY;
     this.nameTagInput.checked = s.showNameTags;
     this.fpsInput.checked = s.showFps;
+    this.soundInput.checked = s.sound !== false;
     this.quality = s.quality;
     this._syncQuality();
   }

@@ -1,4 +1,4 @@
-// 키보드 입력 관리
+// 키보드 + 가상(터치) 입력 관리
 // - 채팅 입력창 등 텍스트 입력 중에는 게임 키를 무시 (Phase 3 채팅 대비)
 // - enabled=false 이면 이동 키가 모두 해제된 것으로 처리 (메뉴/커스터마이징 화면)
 
@@ -7,6 +7,8 @@ export class Input {
     this.keys = new Set();
     this.enabled = true;
     this._listeners = new Map(); // code → Set<fn>  (눌린 순간 1회 호출)
+    // 모바일 조이스틱 값 (-1~1). TouchControls 가 채움
+    this.virtual = { x: 0, y: 0, run: false };
 
     this._onKeyDown = (e) => {
       // 텍스트 입력 중에는 게임 키 무시 (ESC 는 메뉴/창 닫기를 위해 허용)
@@ -37,21 +39,28 @@ export class Input {
     return this.enabled && this.keys.has(code);
   }
 
-  /** WASD/방향키 → {x: 좌우(-1~1), y: 앞뒤(-1~1)} */
+  /** WASD/방향키 + 조이스틱 → {x: 좌우(-1~1), y: 앞뒤(-1~1)} */
   getMoveAxis() {
     if (!this.enabled) return { x: 0, y: 0 };
     const k = this.keys;
-    const x = (k.has('KeyD') || k.has('ArrowRight') ? 1 : 0) - (k.has('KeyA') || k.has('ArrowLeft') ? 1 : 0);
-    const y = (k.has('KeyW') || k.has('ArrowUp') ? 1 : 0) - (k.has('KeyS') || k.has('ArrowDown') ? 1 : 0);
+    let x = (k.has('KeyD') || k.has('ArrowRight') ? 1 : 0) - (k.has('KeyA') || k.has('ArrowLeft') ? 1 : 0);
+    let y = (k.has('KeyW') || k.has('ArrowUp') ? 1 : 0) - (k.has('KeyS') || k.has('ArrowDown') ? 1 : 0);
+    if (x === 0 && y === 0) {
+      x = this.virtual.x;
+      y = this.virtual.y;
+    }
     return { x, y };
   }
 
   isRunning() {
-    return this.isDown('ShiftLeft') || this.isDown('ShiftRight');
+    return this.isDown('ShiftLeft') || this.isDown('ShiftRight') || (this.enabled && this.virtual.run);
   }
 
   clear() {
     this.keys.clear();
+    this.virtual.x = 0;
+    this.virtual.y = 0;
+    this.virtual.run = false;
   }
 
   dispose() {
@@ -61,7 +70,7 @@ export class Input {
   }
 }
 
-const GAME_KEYS = new Set(['KeyW', 'KeyA', 'KeyS', 'KeyD', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Space']);
+const GAME_KEYS = new Set(['KeyW', 'KeyA', 'KeyS', 'KeyD', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Space', 'KeyF', 'KeyG']);
 
 export function isTyping(el) {
   if (!el || !el.tagName) return false;

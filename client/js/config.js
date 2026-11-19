@@ -6,7 +6,7 @@
 // ★ 게임 서버를 배포한 뒤, 그 주소를 여기에 입력하세요. (예: 'https://online-gym-server.onrender.com')
 //   비워두면 localhost 에서 접속할 때만 http://localhost:3000 서버를 사용하고,
 //   그 외에는 오프라인 모드로 실행됩니다.
-const DEPLOYED_SERVER_URL = 'https://online-gym-server.onrender.com/';
+const DEPLOYED_SERVER_URL = '';
 
 const override = (typeof window !== 'undefined' && window.ONLINE_GYM_CONFIG) || {};
 const SERVER_KEY = 'onlinegym.server.v1';
@@ -48,7 +48,7 @@ export const CONFIG = {
   ACCELERATION: 14,
   TURN_SPEED: 12,
   PLAYER_RADIUS: 0.35,
-  JUMP_VELOCITY: 4.6, // m/s → 최고 높이 약 0.8m
+  JUMP_VELOCITY: 5.0, // m/s → 최고 높이 약 0.96m (벤치 쿠션·휴식 벤치 위로 올라설 수 있음)
   GRAVITY: 13, // m/s²
 
   // 카메라
@@ -63,7 +63,7 @@ export const CONFIG = {
 
   // 네트워크
   CONNECT_TIMEOUT_MS: 10000,
-  INTERPOLATION_DELAY_MS: 150, // 다른 플레이어를 이만큼 과거 시점으로 그려 끊김 없이 보간
+  INTERPOLATION_DELAY_MS: 130, // 다른 플레이어를 이만큼 과거 시점(서버 시각 기준)으로 그려 끊김 없이 보간
 
   // 로컬 저장소 키
   STORAGE_KEY_PROFILE: 'onlinegym.profile.v1',

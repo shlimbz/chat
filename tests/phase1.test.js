@@ -77,3 +77,31 @@ test('각도 보간은 짧은 방향으로', () => {
   const r = lerpAngle(3.0, -3.0, 0.5);
   assert.ok(Math.abs(r) > 3.0, `r=${r}`);
 });
+
+test('물리: 높이 있는 장애물 — 낮은 건 올라서고/넘고, 높은 건 막힘', () => {
+  const w = new CollisionWorld({ minX: -10, maxX: 10, minZ: -10, maxZ: 10 });
+  w.addBox(-1, 1, -0.3, 0.3, 'bench', 0.5); // 벤치 (높이 0.5)
+  w.addBox(3, 4, -1, 1, 'rack', 1.36); // 거치대
+  w.addBox(-5, -4, -1, 1, 'deck', 0.2); // 러닝머신 발판 (걸어서 올라감)
+
+  // 바닥에서는 벤치에 막힘
+  const p = { x: 0, z: 0.5 };
+  w.resolveCircle(p, 0.35, 0);
+  assert.ok(p.z >= 0.65 - 1e-9);
+  // 0.3m 이상 떠 있으면 벤치를 통과
+  const q = { x: 0, z: 0.4 };
+  w.resolveCircle(q, 0.35, 0.3);
+  assert.equal(q.z, 0.4);
+  // 벤치 위 바닥 높이 = 0.5 (점프해서 올라섬)
+  assert.equal(w.groundHeight(0, 0, 0.3), 0.5);
+  assert.equal(w.groundHeight(0, 0, 0.1), 0); // 아직 낮으면 벤치 위로 착지 불가
+  // 높은 거치대는 점프 최고점(약 0.96m)에서도 막힘
+  const r = { x: 3.2, z: 0 };
+  w.resolveCircle(r, 0.35, 0.96);
+  assert.ok(r.x <= 2.65 + 1e-9);
+  // 발판은 바닥에서 바로 걸어 올라감
+  assert.equal(w.groundHeight(-4.5, 0, 0), 0.2);
+  const d = { x: -4.5, z: 0 };
+  w.resolveCircle(d, 0.35, 0);
+  assert.equal(d.x, -4.5);
+});

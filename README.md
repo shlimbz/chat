@@ -2,56 +2,60 @@
 
 웹 브라우저에서 바로 실행되는 로우폴리 3D 온라인 멀티플레이 헬스장 게임입니다.
 
-> **현재 단계: Phase 3 완료 (기본 3D 헬스장 + 멀티플레이 + 채팅 + 점프) · DB: 로컬 SQLite 또는 Turso**
+> **현재 버전: Phase 3 + 계정·관리자·전투·모바일 업데이트**
 > 운동 미니게임(Phase 4)과 성장 시스템(Phase 5)은 아직 **없습니다**. 미니게임은 기획 확정 후 진행합니다.
 
 ---
 
 ## 진행 현황
 
-| Phase | 내용 | 상태 |
+| 단계 | 내용 | 상태 |
 |---|---|---|
-| 1 | 3D 헬스장, SD 캐릭터, 커스터마이징, 3인칭 카메라, WASD 이동, 기구 배치, 성능 최적화 | ✅ 완료 |
-| 2 | Node.js + Socket.IO 서버, 닉네임 접속(토큰 인증), 위치·방향·동작 동기화, 접속/퇴장, 재접속 | ✅ 완료 |
-| 3 | 전체 채팅, 채팅 기록 저장/불러오기, 귓속말, 명령어, 닉네임 클릭 귓속말, 상대별 귓속말 기록 | ✅ 완료 |
-| + | 점프 (Space) — 다른 사용자에게도 표시 | ✅ 완료 |
+| 1 | 3D 헬스장, SD 캐릭터, 커스터마이징, 3인칭 카메라, 이동, 기구 배치, 최적화 | ✅ |
+| 2 | Socket.IO 서버, 위치·동작 동기화, 접속/퇴장, 재접속 | ✅ |
+| 3 | 전체 채팅, 기록 저장, 귓속말, 명령어 | ✅ |
+| + | 점프, **계정(아이디/비밀번호) + 캐릭터 3개**, **관리자**, **주먹·발차기**, **높이 있는 물리**, **모바일** | ✅ |
 | 4 | 운동 미니게임 | ⏸ 기획 확인 대기 |
-| 5 | 레벨·경험치, 운동 기록, 근육 성장, 외형 변화 | ⏳ 예정 |
-| 6 | 배포 및 20명 동시 접속 테스트 | ⏳ 예정 (배포 방법은 아래에 미리 안내) |
+| 5 | 레벨·경험치, 운동 기록, 근육 성장 | ⏳ 예정 |
 
 ### 동작하는 기능
 
-**캐릭터 / 공간**
-- 동글동글한 SD 캐릭터, 커스터마이징(체형·피부·얼굴·헤어·헤어컬러·의상·상하의 색·신발), 게임 중 외형 변경
-- 헬스장(32m × 24m), 운동기구 12대, 거울, 휴식 공간, 안내판
-- WASD 이동, Shift 달리기, **Space 점프**, 마우스 드래그 카메라, 휠 줌, 충돌 처리
-- 그래픽 품질(낮음/보통/높음), FPS 표시
+**계정 / 캐릭터**
+- 아이디 + 비밀번호로 회원가입·로그인 (비밀번호는 서버에 해시로만 저장)
+- 한 번 로그인하면 30일 동안 자동 로그인 → 바로 **캐릭터 선택 화면**
+- 계정당 캐릭터 **최대 3개**: 만들기 / 꾸미기 / 삭제, 마지막으로 플레이한 캐릭터가 맨 앞
+- 예전 버전(계정 없이)에서 만든 캐릭터는 같은 브라우저로 로그인하면 자동으로 계정에 들어옴
+- 게임 중 ESC → 캐릭터 변경 / 로그아웃
 
-**멀티플레이**
-- 닉네임으로 접속 → 서버가 계정 생성 + **비밀 토큰** 발급 (브라우저에 저장)
-- 재접속 시 토큰으로 본인 확인 → **닉네임만 알아서는 다른 사람을 사칭할 수 없음**
-- 다른 사용자 실시간 표시(이동·방향·걷기/달리기/점프), 보간으로 부드럽게 표시
-- 접속/퇴장 알림, 접속자 수, 접속자 목록(ESC 메뉴)
-- 연결이 끊기면 자동 재접속 + 상태 재동기화, 같은 캐릭터로 다른 창에서 접속하면 이전 창 종료
-- 서버가 이동을 검증(순간이동·범위 밖·비정상 값 차단), 외형 값도 서버에서 검증
-- 서버 재시작 후에도 캐릭터 외형, 마지막 위치, 채팅 기록 유지 (DB 영구 저장 시)
-- 서버에 접속할 수 없으면 "다시 시도 / 오프라인으로 플레이" 선택
+**관리자** (환경 변수 `ADMIN_USERNAMES` 에 적은 계정)
+- 이름표가 금색 ★, 채팅에 [관리자] 표시
+- ESC → 🛡️ 관리자 패널: 접속자별 뮤트·추방·차단·캐릭터 삭제, 전체 공지, 차단 해제
+- 채팅 명령어: `/kick 닉네임 [사유]`, `/ban 닉네임 [사유]`, `/unban 계정아이디`, `/mute 닉네임 [분]`, `/unmute 닉네임`, `/notice 내용`, `/delchar 닉네임`, `/deluser 계정아이디`
+- 다른 관리자에게는 추방/차단/삭제 불가
 
-**채팅**
-- 좌측 하단 채팅창, `Enter` 로 입력 시작 → `Enter` 로 전송, `ESC` 로 닫기, `/` 키로 바로 명령어 입력
-- 시간 표시, 닉네임/메시지 구분, 스크롤, 접기/펼치기, 한동안 조용하면 반투명
-- 접속 시 최근 50개 + 내 최근 귓속말 불러오기, "↑ 이전 기록 불러오기" 로 더 오래된 기록 조회
-- 귓속말: `/w 닉네임 메시지`, `/msg 닉네임 메시지`, `/r 메시지`(답장)
-  - **서버가 수신자를 확인해 보낸 사람과 받는 사람에게만 전송** (전체 브로드캐스트 안 함)
-  - 보라색으로 일반 채팅과 구분, [귓속말] 탭에서 상대별 기록 조회
-- 채팅창 닉네임 클릭 → 귓속말 시작
-- `/help`, `/who` 명령어
-- 도배 방지(5초에 5개), 200자 제한, HTML 은 글자 그대로 표시(스크립트 실행 불가)
-- 저장 항목: 발신자 ID, 수신자 ID, 메시지, 전송 시각, 메시지 유형
+**전투 (서로 때리며 놀기)**
+- F 주먹(좌우 번갈아), G 발차기 / 모바일은 👊 🦵 버튼
+- 맞으면 뒤로 밀려나고 움찔, 짧은 시간에 여러 번 맞으면 **벌러덩 넘어져 2.5초 기절**(머리 위 별)
+- 타격 이펙트 + 효과음(설정에서 끄기 가능)
+- 판정은 서버가 함 (거리·방향·쿨다운 확인) → 조작으로 아무나 때릴 수 없음
+
+**물리**
+- 기구마다 높이가 있어서: 벤치 쿠션·휴식 벤치는 **점프로 넘거나 올라설 수 있고**, 거치대·머신처럼 높은 부분은 막힘
+- 러닝머신 발판 같은 낮은 턱은 걸어서 올라감, 가장자리에서 걸어 나가면 떨어짐
+- 점프 높이 약 1m
+
+**모바일 (채팅 특화)**
+- 왼쪽 아래 조이스틱(끝까지 밀면 달리기), 오른쪽 아래 점프·주먹·발차기, 기구 근처에서 [이용] 버튼
+- 화면 드래그 = 카메라 회전, 두 손가락 = 확대/축소
+- 💬 버튼 = **채팅 모드**: 채팅창이 화면 전체로 커지고 키보드에 가리지 않음, 3D 는 절전 모드
+- 모바일 첫 실행 시 그래픽 품질 자동 "낮음"
+
+**기존 기능**: SD 캐릭터 커스터마이징, 헬스장, 실시간 멀티플레이(보간), 전체 채팅·귓속말·기록, 재접속, 그래픽 품질, FPS 표시
 
 ### 아직 안 되는 것
-- E 키를 눌러도 미니게임은 실행되지 않고 안내만 나옵니다 (Phase 4)
+- E/[이용] 을 눌러도 미니게임은 실행되지 않고 안내만 나옵니다 (Phase 4)
 - 레벨은 Lv.1 고정, 경험치·운동 기록 없음 (Phase 4~5)
+- 비밀번호 찾기/변경 기능 없음 (잊어버리면 관리자가 `/deluser` 후 다시 가입)
 
 ---
 
@@ -68,6 +72,7 @@ npm run server:install   # 처음 한 번만 (express, socket.io 설치)
 npm run server
 ```
 `ONLINE GYM 게임 서버 실행 중 ▶ 주소: http://localhost:3000` 이 나오면 성공입니다.
+내 컴퓨터에서 관리자를 테스트하려면: `ADMIN_USERNAMES=내아이디 npm run server` (윈도우 PowerShell: `$env:ADMIN_USERNAMES="내아이디"; npm run server`)
 데이터는 `server/data/online-gym.sqlite` 에 저장됩니다.
 
 ### 2) 게임 화면 실행 (터미널 2)
@@ -98,6 +103,7 @@ localhost 로 접속하면 자동으로 `http://localhost:3000` 서버에 연결
 | Space | 점프 |
 | 마우스 드래그 / 휠 | 카메라 회전 / 줌 |
 | E | 가까운 운동기구 이용 |
+| F / G | 주먹 / 발차기 |
 | Enter | 채팅 입력 / 전송 |
 | / | 명령어 입력 시작 |
 | ESC | 채팅 닫기 → 메뉴 열기/닫기 |
@@ -108,7 +114,7 @@ localhost 로 접속하면 자동으로 `http://localhost:3000` 서버에 연결
 | `/w 닉네임 메시지` | 귓속말 (`/msg`, `/tell` 도 동일) |
 | `/r 메시지` | 마지막 귓속말 상대에게 답장 |
 | `/who` | 현재 접속자 목록 |
-| `/help` | 명령어 안내 |
+| `/help` | 명령어 안내 (관리자는 관리자 명령어도 표시) |
 
 ---
 
@@ -121,17 +127,18 @@ npm test
 클라이언트 로직 8개 + 서버 로직 11개 테스트가 실행됩니다 (서버 패키지 설치 없이도 실행 가능). DB 테스트는 로컬 SQLite 와 Turso 방식 두 가지로 모두 실행됩니다.
 - 서버 테스트 내용: 가입/토큰 재접속/닉네임 사칭 차단, 외형 검증, 채팅 명령어 해석, 채팅 저장·페이지 조회, 귓속말이 관련자에게만 조회되는지, 도배 방지, 이동 검증(순간이동·높이 제한)
 
-### 수동 테스트 체크리스트 (서버 + 브라우저 2개)
-1. 창 A 에서 `철수` 로 입장 → 우상단 `접속자 1 / 20명` (초록 점)
-2. 창 B(시크릿) 에서 `철수` 입력 → "이미 다른 사람이 사용 중인 닉네임" 오류. `영희` 로 입장 → 두 창 모두 `접속자 2` 명, 서로 캐릭터가 보임
-3. A 에서 이동/달리기/점프 → B 에서 부드럽게 따라 움직임
-4. A 에서 Enter → `안녕하세요` → 두 창에 모두 표시
-5. B 에서 `/w 철수 비밀` → A·B 에만 보라색 귓속말 표시. 창 C(세 번째) 에는 안 보임
-6. A 에서 `/r 답장`, `/who`, `/help` 확인. 채팅창의 `영희` 클릭 → 입력창에 `/w 영희 `
-7. A 를 새로고침 → 캐릭터 화면에서 바로 입장 → 같은 계정으로 재접속, 이전 채팅·귓속말 기록이 보임
-8. 서버 터미널에서 Ctrl+C → 두 창에 "재연결 중…" → 서버 다시 실행 → 자동으로 다시 연결
-9. A 에서 ESC → 설정 → 캐릭터 커스터마이징 → 저장 → B 화면의 A 외형도 바뀜
-10. [귓속말] 탭 → 상대 선택 → 그 사람과의 귓속말 기록
+### 수동 테스트 체크리스트
+1. 접속 → 로그인 화면 → [회원가입] 으로 가입 → 캐릭터 선택 화면 → [+ 새 캐릭터 만들기] → 입장
+2. 새로고침 → 로그인 없이 바로 캐릭터 선택 화면, 만든 캐릭터가 그대로 있음
+3. 시크릿 창에서 다른 아이디로 가입 → 같은 닉네임으로 캐릭터를 만들면 "이미 사용 중인 닉네임" 오류
+4. 두 캐릭터가 서로 보이고, 이동·점프가 부드럽게 따라옴
+5. 서로 마주 보고 F/G → 맞은 쪽이 밀려남, 여러 번 맞으면 넘어져 별이 돎
+6. 벤치 쿠션 쪽으로 걸어가면 막힘 → Space 로 점프하면 넘어가거나 올라섬
+7. 관리자 아이디로 접속 → 이름표 ★, ESC 에 관리자 패널. `/mute`, `/kick`, `/ban`, `/unban`, `/notice` 확인
+8. 휴대폰으로 접속 → 조이스틱·버튼으로 이동/공격, 💬 로 채팅 모드
+
+### 같은 PC 에서 두 창으로 테스트할 때 주의
+브라우저는 **보이지 않거나 포커스가 없는 창**의 화면 갱신을 크게 줄이거나 멈춥니다. 그 창의 캐릭터는 위치를 자주 못 보내서 다른 창에서 버벅이는 것처럼 보일 수 있습니다. 두 창을 **나란히 둘 다 보이게** 놓고 테스트하거나, 휴대폰 + PC 처럼 다른 기기로 테스트하세요. 실제로 사람마다 다른 기기에서 접속하면 이 현상은 없습니다.
 
 ---
 
@@ -150,9 +157,11 @@ online-gym/
 │     ├─ world/                # Gym, equipment, StaticBatcher, CollisionWorld
 │     ├─ character/            # CharacterModel(SD 캐릭터·애니메이션), PlayerController(이동·점프)
 │     ├─ net/
-│     │  ├─ NetworkClient.js   # Socket.IO 연결·재접속
-│     │  └─ RemotePlayers.js   # 다른 플레이어 표시·보간
-│     ├─ ui/                   # CharacterCreator, HUD, Menu, ChatPanel, ConnectDialog
+│     │  ├─ ApiClient.js       # 로그인·캐릭터 REST API
+│     │  ├─ NetworkClient.js   # Socket.IO 연결·재접속 (웹소켓 전용)
+│     │  └─ RemotePlayers.js   # 다른 플레이어 표시·서버 시각 기반 보간
+│     ├─ ui/                   # AccountScreens(로그인·캐릭터 선택), CharacterCreator, CharacterPreview,
+│     │                        # HUD, Menu(관리자 패널), ChatPanel, ConnectDialog, mobile(터치 조작)
 │     └─ shared/               # ★ 서버와 공유 (Three.js 비의존)
 │        ├─ appearance.js      # 외형·닉네임 검증
 │        ├─ protocol.js        # 이벤트 이름, 동작 코드, 위치 범위, 채팅 규칙
@@ -162,13 +171,15 @@ online-gym/
 │  ├─ .env.example             # 환경 변수 설명
 │  ├─ src/
 │  │  ├─ index.js              # 실행 진입점
-│  │  ├─ app.js                # Express + Socket.IO 생성, /health
+│  │  ├─ app.js                # Express(로그인·캐릭터 API) + Socket.IO, /health
 │  │  ├─ config.js             # PORT, DB_PATH, CLIENT_ORIGIN, MAX_PLAYERS
 │  │  ├─ db.js                 # DB 연결 (로컬 SQLite 또는 Turso) + 스키마 관리
-│  │  ├─ services/UserService.js   # 계정·토큰(해시 저장)·외형·마지막 위치
+│  │  ├─ services/AccountService.js   # 계정·비밀번호(scrypt)·세션·차단
+│  │  ├─ services/CharacterService.js # 캐릭터(계정당 3개)·외형·마지막 위치
 │  │  ├─ services/ChatService.js   # 채팅 저장/조회, 명령어 해석, 도배 방지
 │  │  ├─ game/PlayerRegistry.js    # 접속자 관리, 이동 검증, 변경분 스냅샷
-│  │  └─ socket/handlers.js        # 접속 인증, 동기화, 채팅 이벤트
+│  │  ├─ game/combat.js            # 주먹/발차기 판정, 넉백, 기절
+│  │  └─ socket/handlers.js        # 접속 인증(세션+캐릭터), 동기화, 채팅, 전투, 관리자 기능
 │  ├─ test/services.test.js  # 로컬/Turso 두 방식 모두 테스트
 │  └─ test-utils/fakeLibsql.js # 테스트용 가짜 Turso 클라이언트
 ├─ tools/serve.js              # 개발용 정적 서버
@@ -177,14 +188,16 @@ online-gym/
 ```
 
 ### 네트워크 설계 (가볍게)
-- 클라이언트 → 서버: 초당 최대 10회, **위치가 바뀌었을 때만** `[x, y, z, 방향, 동작번호]` 전송
-- 서버 → 클라이언트: 초당 10회, **움직인 사람만** 묶어서 한 번에 전송 (가만히 있으면 0바이트)
+- 클라이언트 → 서버: 초당 최대 12회, **위치가 바뀌었을 때만** `[x, y, z, 방향, 동작번호]` 전송
+- 서버 → 클라이언트: 초당 12회, **움직인 사람만** 묶어서 서버 시각과 함께 전송 (가만히 있으면 0바이트)
+- 처음부터 웹소켓으로 연결 (HTTP 폴링 단계를 건너뛰어 지연·패킷 몰림 방지)
 - 외형은 접속 때 한 번, 바뀔 때만 전송
-- 다른 플레이어는 150ms 전 시점을 보간해 그려 끊김 없이 표시
+- 다른 플레이어는 서버 시각 기준 130ms 전 시점을 보간, 데이터가 잠깐 끊기면 짧게 예측해서 멈칫하지 않게 표시
 - 예상 전송량: 20명이 모두 움직여도 1인당 초당 약 6KB 수준
 
 ### 보안 설계
-- 토큰 원문은 서버에 저장하지 않고 SHA-256 해시만 저장
+- 비밀번호는 scrypt 해시, 로그인 세션 토큰은 SHA-256 해시로만 저장
+- 로그인/가입 시도 제한 (IP 당 10분에 20회)
 - 닉네임 중복 불가(대소문자 무시) → 기존 닉네임으로 가입 시도는 거절
 - 외형/위치/채팅 등 클라이언트가 보낸 값은 서버에서 모두 검증
 - 귓속말은 `io.to(수신자소켓)` 으로 두 사람에게만 전송
@@ -227,13 +240,16 @@ Socket.IO, Express, Turso 연결 부품은 Render 가 `npm install` 단계에서
    | Build Command | `npm install --prefix server` |
    | Start Command | `npm start --prefix server` |
    | Instance Type | **Free** |
-4. **Environment Variables** 에 4개 추가
+4. **Environment Variables** 에 5개 추가
    | Key | Value |
    |---|---|
    | `NODE_VERSION` | `24` |
    | `CLIENT_ORIGIN` | `https://내아이디.github.io` (끝에 `/` 없이) |
    | `TURSO_DATABASE_URL` | 2단계에서 복사한 `libsql://...` 주소 |
    | `TURSO_AUTH_TOKEN` | 2단계에서 복사한 토큰 |
+   | `ADMIN_USERNAMES` | 관리자로 쓸 **게임 계정 아이디** (예: `shlimbz`, 여러 개는 쉼표로) |
+
+   > 이미 서버를 올렸다면: Render → 서비스 → **Environment** 에서 `ADMIN_USERNAMES` 만 추가하고 저장하면 자동으로 재시작됩니다. 그 아이디로 게임에서 회원가입하면 관리자가 됩니다.
 5. **Deploy Web Service** → 로그에 `ONLINE GYM 게임 서버 실행 중` 과 `DB : Turso (...)` 가 보이면 성공
 6. 화면 왼쪽 위의 `https://online-gym-server-xxxx.onrender.com` 주소 복사 → 뒤에 `/health` 를 붙여 열었을 때 `"db":"turso"` 가 보이면 정상
 
@@ -271,6 +287,26 @@ const DEPLOYED_SERVER_URL = 'https://online-gym-server-xxxx.onrender.com';
 | 프레임이 낮음 | ESC → 설정 → 그래픽 품질 "낮음", "FPS 표시"로 확인 |
 
 ---
+
+## 변경 파일 목록 (계정·관리자·전투·물리·모바일 업데이트)
+
+```
+신규  server/src/services/AccountService.js, server/src/services/CharacterService.js (UserService.js 대체)
+신규  server/src/game/combat.js
+변경  server/src/db.js (스키마 v2: accounts, sessions — 기존 DB 는 서버 시작 시 자동 변환)
+변경  server/src/app.js (로그인·캐릭터 API, CORS), server/src/socket/handlers.js (세션 인증, 전투, 관리자)
+변경  server/src/config.js, index.js (ADMIN_USERNAMES), server/src/game/PlayerRegistry.js, services/ChatService.js
+변경  server/test/services.test.js
+신규  client/js/net/ApiClient.js, client/js/ui/AccountScreens.js, client/js/ui/CharacterPreview.js, client/js/ui/mobile.js
+신규  client/js/core/Effects.js
+변경  client/js/main.js, core/Game.js, core/Input.js, core/CameraController.js, core/storage.js
+변경  client/js/character/CharacterModel.js (공격·피격·기절 모션), PlayerController.js (높이 물리, 넉백)
+변경  client/js/world/CollisionWorld.js (높이 충돌), world/equipment.js, world/Gym.js
+변경  client/js/net/NetworkClient.js, net/RemotePlayers.js (버벅임 개선)
+변경  client/js/ui/CharacterCreator.js, ChatPanel.js, HUD.js, Menu.js
+변경  client/js/shared/protocol.js, client/js/config.js, client/index.html, client/css/style.css
+변경  tests/phase1.test.js, README.md
+```
 
 ## 변경 파일 목록 (Turso 지원)
 

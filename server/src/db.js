@@ -40,6 +40,29 @@ export const MIGRATIONS = [
   CREATE INDEX IF NOT EXISTS idx_chat_pair ON chat_messages(sender_id, receiver_id, id);
   CREATE INDEX IF NOT EXISTS idx_chat_receiver ON chat_messages(receiver_id, sender_id, id);
   `,
+  // v2: 계정(아이디/비밀번호) + 로그인 세션 + 계정당 캐릭터 (users 테이블 = 캐릭터)
+  `
+  CREATE TABLE IF NOT EXISTS accounts (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    username      TEXT NOT NULL UNIQUE COLLATE NOCASE,
+    password_hash TEXT NOT NULL,
+    role          TEXT NOT NULL DEFAULT 'user',
+    banned        INTEGER NOT NULL DEFAULT 0,
+    ban_reason    TEXT,
+    created_at    INTEGER NOT NULL,
+    last_login_at INTEGER
+  );
+  CREATE TABLE IF NOT EXISTS sessions (
+    token_hash  TEXT PRIMARY KEY,
+    account_id  INTEGER NOT NULL REFERENCES accounts(id),
+    created_at  INTEGER NOT NULL,
+    expires_at  INTEGER NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_sessions_account ON sessions(account_id);
+  ALTER TABLE users ADD COLUMN account_id INTEGER REFERENCES accounts(id);
+  ALTER TABLE users ADD COLUMN deleted_at INTEGER;
+  CREATE INDEX IF NOT EXISTS idx_users_account ON users(account_id);
+  `,
 ];
 
 /**

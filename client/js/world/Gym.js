@@ -105,7 +105,7 @@ export class Gym {
     obj.group.position.set(x, 0, z);
     obj.group.rotation.y = rotY;
     this.root.add(obj.group);
-    if (obj.collider) this.collision.addLocalBox(obj.collider, x, z, rotY, colliderTag);
+    for (const c of obj.colliders || []) this.collision.addLocalBox(c, x, z, rotY, colliderTag);
     return obj;
   }
 

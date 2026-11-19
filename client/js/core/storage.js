@@ -55,6 +55,7 @@ export const DEFAULT_SETTINGS = Object.freeze({
   quality: 'medium',
   showNameTags: true,
   showFps: false,
+  sound: true,
 });
 
 export function loadSettings() {
@@ -65,6 +66,7 @@ export function loadSettings() {
   if (typeof data.quality === 'string' && QUALITY_PRESETS[data.quality]) s.quality = data.quality;
   if (typeof data.showNameTags === 'boolean') s.showNameTags = data.showNameTags;
   if (typeof data.showFps === 'boolean') s.showFps = data.showFps;
+  if (typeof data.sound === 'boolean') s.sound = data.sound;
   return s;
 }
 
@@ -87,4 +89,33 @@ export function saveToken(serverUrl, nickname, token) {
   const all = read(TOKENS_KEY) || {};
   all[serverUrl] = { nickname, token };
   return write(TOKENS_KEY, all);
+}
+
+export function clearTokens(serverUrl) {
+  const all = read(TOKENS_KEY) || {};
+  delete all[serverUrl];
+  return write(TOKENS_KEY, all);
+}
+
+// ── 로그인 세션 (서버별) ───────────────────────────────
+// 로그인하면 서버가 주는 세션 토큰을 저장 → 다음 접속 때 자동 로그인
+const SESSIONS_KEY = 'onlinegym.sessions.v1';
+
+/** @returns {{token:string, username:string, lastCharacterId?:number}|null} */
+export function loadSession(serverUrl) {
+  const all = read(SESSIONS_KEY) || {};
+  const s = all[serverUrl];
+  return s && typeof s.token === 'string' ? s : null;
+}
+
+export function saveSession(serverUrl, session) {
+  const all = read(SESSIONS_KEY) || {};
+  all[serverUrl] = { ...(all[serverUrl] || {}), ...session };
+  return write(SESSIONS_KEY, all);
+}
+
+export function clearSession(serverUrl) {
+  const all = read(SESSIONS_KEY) || {};
+  delete all[serverUrl];
+  return write(SESSIONS_KEY, all);
 }

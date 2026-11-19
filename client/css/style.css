@@ -17,6 +17,8 @@
 html, body {
   margin: 0;
   height: 100%;
+  overscroll-behavior: none;
+  -webkit-tap-highlight-color: transparent;
   overflow: hidden;
   background: #dfe8f0;
   font-family: var(--font);
@@ -129,7 +131,8 @@ html, body {
   border: 3px solid var(--ink); border-radius: 20px; box-shadow: 0 6px 0 var(--ink);
   overflow: hidden;
 }
-.creator-canvas { width: 100%; height: 100%; display: block; cursor: grab; touch-action: none; }
+.preview-wrap { position: absolute; inset: 0; }
+.preview-canvas { width: 100%; height: 100%; display: block; cursor: grab; touch-action: none; }
 .creator-hint {
   position: absolute; bottom: 14px; left: 50%; transform: translateX(-50%);
   font-size: 13px; color: var(--ink-soft); background: rgba(255,255,255,.8);
@@ -271,3 +274,129 @@ kbd {
   .creator-panel { width: 100%; flex: 1; }
   .creator-preview { flex: 0 0 34%; }
 }
+
+
+/* ── 공통 추가 ───────────────────── */
+.btn:disabled { opacity: .5; cursor: not-allowed; }
+.btn-danger { color: var(--red); border-color: var(--red); box-shadow: 0 3px 0 var(--red); }
+.admin-badge {
+  display: inline-block; background: #ffd84a; color: #5a3d00; font-size: 11px; font-weight: 900;
+  border-radius: 6px; padding: 1px 6px; margin-left: 6px; vertical-align: middle;
+}
+.overlay.screen { background: linear-gradient(160deg, #f3eee6 0%, #e4ecf4 100%); }
+.logo-big { font-size: 40px; text-align: center; }
+
+/* ── 로그인 ─────────────────────── */
+.auth-panel {
+  width: min(400px, 92vw); background: var(--panel);
+  border: 3px solid var(--ink); border-radius: 22px; box-shadow: 0 6px 0 var(--ink);
+  padding: 26px 24px; display: flex; flex-direction: column; gap: 12px;
+}
+.auth-sub { margin: -4px 0 4px; text-align: center; color: var(--ink-soft); font-size: 14px; }
+.auth-tabs { display: flex; gap: 6px; }
+.auth-tab { flex: 1; font: inherit; font-weight: 800; padding: 9px; border-radius: 12px; border: 2px solid #c9c4ba; background: #fff; cursor: pointer; }
+.auth-tab.selected { background: var(--ink); color: #fff; border-color: var(--ink); }
+.auth-form { display: flex; flex-direction: column; gap: 8px; }
+.auth-input {
+  font: inherit; font-size: 16px; padding: 11px 12px; border: 2px solid var(--ink); border-radius: 12px; outline: none; user-select: text;
+}
+.auth-input:focus { box-shadow: 0 0 0 3px rgba(246, 213, 92, 0.8); }
+.auth-submit { width: 100%; padding: 12px; font-size: 16px; }
+.auth-status { font-size: 13px; color: var(--ink-soft); text-align: center; min-height: 0; }
+.auth-link { font: inherit; font-size: 13px; color: var(--ink-soft); background: none; border: 0; text-decoration: underline; cursor: pointer; padding: 4px; }
+
+/* ── 캐릭터 선택 ─────────────────── */
+.select-head { display: flex; justify-content: space-between; align-items: center; font-weight: 800; }
+.select-slots { display: flex; flex-direction: column; gap: 8px; flex: 1; overflow-y: auto; }
+.slot {
+  font: inherit; display: flex; align-items: center; gap: 10px; text-align: left; cursor: pointer;
+  border: 2px solid #c9c4ba; background: #fff; border-radius: 14px; padding: 14px;
+}
+.slot b { flex: 1; font-size: 17px; }
+.slot small { color: var(--ink-soft); font-weight: 700; }
+.slot.selected { border-color: var(--ink); background: #fff6d6; box-shadow: 0 3px 0 var(--ink); }
+.slot-empty { justify-content: center; color: var(--ink-soft); border-style: dashed; font-weight: 800; }
+.slot-dots { display: flex; gap: 3px; }
+.slot-dots i { width: 14px; height: 14px; border-radius: 50%; border: 1px solid rgba(0,0,0,.2); display: block; }
+.select-right { flex: 1; display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.select-preview { flex: 1; }
+.select-name { text-align: center; font-size: 22px; font-weight: 900; }
+
+/* ── 메뉴 추가 ───────────────────── */
+.menu-account { text-align: center; font-weight: 800; color: var(--ink-soft); margin: -6px 0 4px; }
+.menu-inline { display: flex; gap: 6px; align-items: center; }
+.menu-input { flex: 1; min-width: 0; font: inherit; font-size: 14px; padding: 7px 10px; border: 2px solid var(--ink); border-radius: 10px; user-select: text; }
+.admin-row { flex-wrap: wrap; }
+.admin-actions { display: flex; gap: 4px; flex-wrap: wrap; }
+.admin-actions .chip { padding: 3px 8px; font-size: 12px; }
+.admin-msg { min-height: 16px; font-weight: 700; color: var(--ink); }
+.menu-panel { max-height: 92vh; overflow-y: auto; }
+
+/* ── 채팅 추가 ───────────────────── */
+.chat-badge-admin { background: #d9a400; color: #fff; }
+.chat-badge-notice { background: var(--red); color: #fff; }
+.chat-notice .chat-text { color: #ffb3b8; font-weight: 800; }
+.chat-name.deleted { color: rgba(255,255,255,.5); cursor: default; text-decoration: none; }
+
+/* ── 모바일 터치 조작 ─────────────── */
+.touch-ui { position: fixed; inset: 0; pointer-events: none; z-index: 12; }
+.touch-ui > * { pointer-events: auto; }
+.joy-zone { position: absolute; left: 0; bottom: 0; width: 45vw; height: 55vh; touch-action: none; }
+.joy-base {
+  position: absolute; left: 90px; top: calc(100% - 110px); width: 110px; height: 110px; margin: -55px 0 0 -55px;
+  border-radius: 50%; background: rgba(255,255,255,.18); border: 3px solid rgba(255,255,255,.55);
+  display: flex; align-items: center; justify-content: center; transition: opacity .2s;
+  opacity: .6;
+}
+.joy-base.active { opacity: 1; }
+.joy-knob { width: 50px; height: 50px; border-radius: 50%; background: rgba(255,255,255,.85); box-shadow: 0 2px 6px rgba(0,0,0,.3); }
+.tbtns { position: absolute; right: 14px; bottom: 18px; display: grid; grid-template-columns: 64px 64px; gap: 10px; align-items: end; }
+.tbtn {
+  font: inherit; font-weight: 900; font-size: 15px; color: var(--ink); touch-action: manipulation; user-select: none;
+  width: 64px; height: 64px; border-radius: 50%; border: 3px solid var(--ink); background: rgba(255,255,255,.88);
+  box-shadow: 0 3px 0 var(--ink);
+}
+.tbtn.down { transform: translateY(2px); box-shadow: 0 1px 0 var(--ink); background: var(--yellow); }
+.tbtn-punch, .tbtn-kick { font-size: 26px; }
+.tbtn-jump { grid-column: 2; background: rgba(246, 213, 92, .95); }
+.tbtn-use { grid-column: 1 / span 2; width: auto; height: 44px; border-radius: 14px; font-size: 14px; }
+.ttop { position: absolute; right: 12px; top: 54px; display: flex; flex-direction: column; gap: 8px; }
+.tbtn-small { width: 44px; height: 44px; font-size: 20px; }
+
+/* ── 모바일 레이아웃 ─────────────── */
+body.mobile .hud-help, body.mobile .hud-bottom-right, body.mobile .hud-prompt { display: none; }
+body.mobile .hud-box { font-size: 12px; padding: 6px 10px; }
+body.mobile .hud-top-left { top: 8px; left: 8px; }
+body.mobile .hud-top-right { top: 8px; right: 8px; }
+body.mobile .hud-name { font-size: 14px; }
+body.mobile .hud-chat-slot { left: 8px; right: auto; top: 50px; bottom: auto; width: min(60vw, 330px); }
+body.mobile .chat-log { height: 110px; }
+body.mobile .chat:not(.expanded) .chat-input { display: none; }
+body.mobile .chat:not(.expanded) .chat-head .chat-tab { display: none; }
+body.mobile .chat-line { font-size: 12px; }
+/* 채팅 모드: 채팅창이 화면 대부분 차지 (키보드가 올라와도 보이게) */
+body.mobile .chat.expanded {
+  position: fixed; left: 0; right: 0; top: var(--vv-top, 0px); height: var(--vvh, 100dvh);
+  padding: 8px; background: rgba(20, 22, 28, .82); z-index: 30; gap: 6px;
+}
+body.mobile .chat.expanded .chat-body { flex: 1; display: flex; flex-direction: column; min-height: 0; opacity: 1; }
+body.mobile .chat.expanded .chat-log { height: auto; flex: 1; }
+body.mobile .chat.expanded .chat-line { font-size: 15px; }
+body.mobile .chat.expanded .chat-input { font-size: 16px; padding: 11px 12px; display: block; }
+body.mobile .chat.expanded .chat-tab, body.mobile .chat.expanded .chat-toggle { font-size: 14px; padding: 6px 12px; }
+body.mobile .chat.expanded .chat-head, body.mobile .chat.expanded .chat-body { opacity: 1 !important; }
+body.mobile .hud-toast { top: 30%; font-size: 13px; }
+body.mobile .menu-panel { width: min(360px, 94vw); padding: 16px; }
+body.mobile .menu-btn { padding: 12px 14px; }
+
+@media (max-width: 860px) {
+  .select-right { flex: 0 0 38%; }
+  .select-name { font-size: 18px; }
+  .slot { padding: 10px; }
+  .logo-big { font-size: 32px; }
+}
+@media (max-width: 860px) and (orientation: portrait) {
+  .creator-wrap { height: 96dvh; }
+}
+body.mobile.chat-mode .hud-top-left, body.mobile.chat-mode .hud-top-right, body.mobile.chat-mode .hud-toast { display: none; }
+body.mobile .chat.expanded { background: rgba(20, 22, 28, .94); }

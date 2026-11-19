@@ -13,6 +13,7 @@ console.log(`  ▶ 주소: http://localhost:${port}   (상태 확인: /health)`)
 console.log(`  ▶ DB  : ${server.dbDescription}`);
 console.log(`  ▶ 허용 주소(CLIENT_ORIGIN): ${Array.isArray(config.CLIENT_ORIGIN) ? config.CLIENT_ORIGIN.join(', ') : '*'}`);
 console.log(`  ▶ 최대 인원: ${config.MAX_PLAYERS}명`);
+console.log(`  ▶ 관리자 아이디: ${config.ADMIN_USERNAMES.length ? config.ADMIN_USERNAMES.join(', ') : '(없음 — ADMIN_USERNAMES 환경 변수로 지정)'}`);
 console.log('');
 
 let closing = false;

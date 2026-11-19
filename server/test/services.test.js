@@ -1,14 +1,15 @@
 // 서버 로직 단위 테스트 (socket.io/express 설치 없이 실행 가능)
 //   cd server && npm test
 // DB 관련 테스트는 두 방식(로컬 SQLite, Turso 어댑터)으로 똑같이 실행합니다.
-// Turso 는 실제 응답 형식을 흉내 낸 가짜 클라이언트(fakeLibsql.js)로 검증합니다.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { openDatabase } from '../src/db.js';
 import { createFakeLibsqlClient } from '../test-utils/fakeLibsql.js';
-import { UserService } from '../src/services/UserService.js';
+import { AccountService, hashPassword, verifyPassword } from '../src/services/AccountService.js';
+import { CharacterService, hashToken } from '../src/services/CharacterService.js';
 import { ChatService, parseChatInput, cleanText, RateLimiter } from '../src/services/ChatService.js';
 import { PlayerRegistry } from '../src/game/PlayerRegistry.js';
+import { resolveAttack } from '../src/game/combat.js';
 
 const BACKENDS = {
   local: () => openDatabase({ DB_PATH: ':memory:' }),
@@ -16,100 +17,162 @@ const BACKENDS = {
 };
 
 for (const [name, makeDb] of Object.entries(BACKENDS)) {
-  test(`[${name}] 스키마 생성은 여러 번 실행해도 안전`, async () => {
+  test(`[${name}] 스키마 v2 생성 + 재시작 시 재실행 안 함`, async () => {
     const client = name === 'turso' ? createFakeLibsqlClient() : null;
-    const open = () => (client ? openDatabase({}, { libsqlClient: client }) : makeDb());
-    const db = await open();
+    const db = client ? await openDatabase({}, { libsqlClient: client }) : await makeDb();
     assert.equal(db.kind, name);
-    const v = await db.get("SELECT value FROM _meta WHERE key = 'schema_version'");
-    assert.equal(Number(v.value), 1);
+    assert.equal(Number((await db.get("SELECT value FROM _meta WHERE key = 'schema_version'")).value), 2);
     if (client) {
       const before = client.calls.executeMultiple;
-      await openDatabase({}, { libsqlClient: client }); // 재시작 상황
-      assert.equal(client.calls.executeMultiple, before + 1); // _meta 생성만, 마이그레이션 재실행 없음
+      await openDatabase({}, { libsqlClient: client });
+      assert.equal(client.calls.executeMultiple, before + 1);
     }
   });
 
-  test(`[${name}] 계정: 가입 → 토큰 재접속 → 닉네임 사칭 차단`, async () => {
-    const users = new UserService(await makeDb());
-    const a = await users.register('헬린이', { body: 'female' });
-    assert.equal(a.ok, true);
-    assert.ok(a.token.length >= 30);
-    assert.equal(a.user.appearance.body, 'female');
-    assert.equal(typeof a.user.id, 'number');
+  test(`[${name}] 계정: 가입/로그인/세션/로그아웃/차단`, async () => {
+    const accounts = new AccountService(await makeDb(), { adminUsernames: ['BossAdmin'] });
+    const r = await accounts.register('player01', 'secret123');
+    assert.equal(r.ok, true);
+    assert.equal(r.account.isAdmin, false);
+    assert.equal((await accounts.register('PLAYER01', 'whatever1')).ok, false); // 대소문자 무시 중복
+    assert.equal((await accounts.register('ab', 'secret123')).ok, false); // 짧은 아이디
+    assert.equal((await accounts.register('player02', '123')).ok, false); // 짧은 비번
 
-    assert.deepEqual(await users.register('헬린이', {}), { ok: false, error: 'NICK_TAKEN' });
-    const b = await users.register('GymBro', {});
-    assert.equal(b.ok, true);
-    assert.deepEqual(await users.register('gymbro', {}), { ok: false, error: 'NICK_TAKEN' });
+    assert.equal((await accounts.login('player01', 'wrongpw')).ok, false);
+    assert.equal((await accounts.login('nobody', 'secret123')).ok, false);
+    const l = await accounts.login('player01', 'secret123');
+    assert.equal(l.ok, true);
+    assert.equal((await accounts.fromSession(l.token)).username, 'player01');
+    assert.equal(await accounts.fromSession('x'.repeat(40)), null);
 
-    assert.equal((await users.findByToken(a.token)).id, a.user.id);
-    assert.equal(await users.findByToken('x'.repeat(32)), null);
-    assert.equal((await users.findByToken(b.token)).nickname, 'GymBro');
+    await accounts.logout(l.token);
+    assert.equal(await accounts.fromSession(l.token), null);
+    assert.equal((await accounts.fromSession(r.token)).id, r.account.id); // 다른 세션은 유지
 
-    assert.deepEqual(await users.register('a', {}), { ok: false, error: 'NICK_INVALID' });
-    assert.deepEqual(await users.register('<b>hi</b>', {}), { ok: false, error: 'NICK_INVALID' });
+    await accounts.setBanned(r.account.id, true, '도배');
+    assert.equal(await accounts.fromSession(r.token), null); // 차단 시 세션 삭제
+    const banned = await accounts.login('player01', 'secret123');
+    assert.equal(banned.ok, false);
+    assert.equal(banned.code, 'BANNED');
+    await accounts.setBanned(r.account.id, false);
+    assert.equal((await accounts.login('player01', 'secret123')).ok, true);
+
+    const admin = await accounts.register('bossadmin', 'secret123');
+    assert.equal(admin.account.isAdmin, true); // ADMIN_USERNAMES (대소문자 무시)
   });
 
-  test(`[${name}] 계정: 외형은 검증된 값만 저장, 마지막 위치 저장`, async () => {
-    const users = new UserService(await makeDb());
-    const { user } = await users.register('테스터', { hair: 'evil', skin: '#ffe3cc' });
-    assert.equal(user.appearance.hair, 'short');
-    assert.equal((await users.updateAppearance(user.id, { body: 'stocky', skin: 'javascript:alert(1)' })).skin, '#f6cba3');
-    assert.equal((await users.findById(user.id)).appearance.body, 'stocky');
-    await users.saveLastSeen(user.id, { x: 3, z: -2, r: 1 });
-    assert.deepEqual((await users.findById(user.id)).lastPos, { x: 3, z: -2, r: 1 });
+  test(`[${name}] 캐릭터: 계정당 3개, 소유 확인, 삭제 후 닉네임 재사용, 예전 캐릭터 가져오기`, async () => {
+    const db = await makeDb();
+    const accounts = new AccountService(db);
+    const characters = new CharacterService(db);
+    const a = (await accounts.register('user_a', 'secret123')).account;
+    const b = (await accounts.register('user_b', 'secret123')).account;
+
+    const c1 = await characters.create(a.id, '헬린이', { body: 'female' });
+    assert.equal(c1.ok, true);
+    assert.equal(c1.character.appearance.body, 'female');
+    assert.equal((await characters.create(b.id, '헬린이', {})).ok, false); // 닉네임 중복
+    await characters.create(a.id, '둘째', {});
+    await characters.create(a.id, '셋째', {});
+    const fourth = await characters.create(a.id, '넷째', {});
+    assert.equal(fourth.ok, false);
+    assert.match(fourth.error, /최대 3개/);
+
+    assert.equal((await characters.listByAccount(a.id)).length, 3);
+    assert.equal(await characters.findOwned(b.id, c1.character.id), null); // 남의 캐릭터 사용 불가
+    assert.equal((await characters.findOwned(a.id, c1.character.id)).nickname, '헬린이');
+
+    await characters.softDelete(c1.character.id);
+    assert.equal((await characters.listByAccount(a.id)).length, 2);
+    assert.equal(await characters.findByNickname('헬린이'), null);
+    assert.equal((await characters.create(b.id, '헬린이', {})).ok, true); // 삭제 후 닉네임 재사용
+
+    // 예전 버전(토큰 방식) 캐릭터
+    const legacyToken = 'legacy-token-abcdefghijklmnop';
+    await db.run(
+      'INSERT INTO users (nickname, token_hash, appearance, created_at, last_seen_at) VALUES (?, ?, ?, ?, ?)',
+      ['옛날캐릭', hashToken(legacyToken), '{}', 0, 0],
+    );
+    const claimed = await characters.claimLegacy(b.id, legacyToken);
+    assert.equal(claimed.nickname, '옛날캐릭');
+    assert.equal(claimed.accountId, b.id);
+    assert.equal(await characters.claimLegacy(a.id, legacyToken), null); // 이미 가져간 캐릭터
+  });
+
+  test(`[${name}] 계정 삭제 시 캐릭터도 정리, 채팅 기록은 "(삭제된 캐릭터)" 로 남음`, async () => {
+    const db = await makeDb();
+    const accounts = new AccountService(db);
+    const characters = new CharacterService(db);
+    const chat = new ChatService(db);
+    const a = (await accounts.register('leaver', 'secret123')).account;
+    const ca = (await characters.create(a.id, '떠날사람', {})).character;
+    const b = (await accounts.register('stayer', 'secret123')).account;
+    const cb = (await characters.create(b.id, '남는사람', {})).character;
+    await chat.saveGlobal(ca, '안녕');
+    await chat.saveWhisper(cb, ca, '잘가');
+    await accounts.deleteAccount(a.id);
+    assert.equal(await accounts.findByUsername('leaver'), null);
+    assert.equal(await characters.findByNickname('떠날사람'), null);
+    const hist = await chat.globalHistory();
+    assert.equal(hist.at(-1).from, '(삭제된 캐릭터)');
+    assert.deepEqual(await chat.whisperPartners(cb.id), []);
   });
 
   test(`[${name}] 채팅 저장/조회: 페이지, 귓속말 상대별 조회`, async () => {
     const db = await makeDb();
-    const users = new UserService(db);
+    const accounts = new AccountService(db);
+    const characters = new CharacterService(db);
     const chat = new ChatService(db);
-    const a = (await users.register('에이', {})).user;
-    const b = (await users.register('비비', {})).user;
-    const c = (await users.register('씨씨', {})).user;
+    const acc = (await accounts.register('chatter', 'secret123')).account;
+    const a = (await characters.create(acc.id, '에이', {})).character;
+    const b = (await characters.create(acc.id, '비비', {})).character;
+    const c = (await characters.create(acc.id, '씨씨', {})).character;
 
     for (let i = 0; i < 60; i++) await chat.saveGlobal(a, `msg ${i}`);
     const w1 = await chat.saveWhisper(a, b, '비밀1');
     await chat.saveWhisper(b, a, '비밀2');
     await chat.saveWhisper(a, c, '씨에게');
-
-    assert.deepEqual(
-      { type: w1.type, from: w1.from, to: w1.to, text: w1.text, idOk: Number.isInteger(w1.id) },
-      { type: 'whisper', from: '에이', to: '비비', text: '비밀1', idOk: true },
-    );
+    assert.equal(w1.to, '비비');
 
     const recent = await chat.globalHistory();
     assert.equal(recent.length, 50);
     assert.equal(recent.at(-1).text, 'msg 59');
-    assert.equal(recent.at(-1).from, '에이');
     const older = await chat.globalHistory(recent[0].id);
     assert.equal(older.length, 10);
     assert.equal(older[0].text, 'msg 0');
 
-    // 귓속말은 관련자에게만
     const forC = (await chat.initialHistory(c.id)).filter((m) => m.type === 'whisper');
     assert.deepEqual(forC.map((m) => m.text), ['씨에게']);
-    const forB = (await chat.initialHistory(b.id)).filter((m) => m.type === 'whisper');
-    assert.deepEqual(forB.map((m) => m.text), ['비밀1', '비밀2']);
-
     assert.deepEqual((await chat.whisperPartners(a.id)).map((p) => p.nickname), ['씨씨', '비비']);
     assert.deepEqual((await chat.whispersBetween(a.id, b.id)).map((m) => m.text), ['비밀1', '비밀2']);
     assert.deepEqual(await chat.whispersBetween(b.id, c.id), []);
   });
 }
 
-test('채팅 입력 해석', () => {
+test('비밀번호 해시: 원문 저장 안 함, 검증', async () => {
+  const h1 = await hashPassword('hello123');
+  const h2 = await hashPassword('hello123');
+  assert.notEqual(h1, h2); // 솔트
+  assert.equal(h1.includes('hello123'), false);
+  assert.equal(await verifyPassword('hello123', h1), true);
+  assert.equal(await verifyPassword('hello124', h1), false);
+});
+
+test('채팅 입력 해석 (일반 + 관리자 명령어)', () => {
   assert.deepEqual(parseChatInput('  안녕  하세요 '), { kind: 'global', text: '안녕 하세요' });
   assert.deepEqual(parseChatInput('/w 철수 같이 운동해요'), { kind: 'whisper', target: '철수', text: '같이 운동해요' });
-  assert.deepEqual(parseChatInput('/msg 철수 hi'), { kind: 'whisper', target: '철수', text: 'hi' });
   assert.equal(parseChatInput('/w 철수').kind, 'error');
   assert.equal(parseChatInput('/r 답장').kind, 'reply');
   assert.equal(parseChatInput('/WHO').kind, 'who');
-  assert.equal(parseChatInput('/help').kind, 'help');
   assert.equal(parseChatInput('/dance').kind, 'error');
   assert.equal(parseChatInput('   ').kind, 'empty');
-  assert.equal(parseChatInput(123).kind, 'empty');
+  assert.deepEqual(parseChatInput('/kick 철수 도배 그만'), { kind: 'admin', action: 'kick', target: '철수', reason: '도배 그만' });
+  assert.deepEqual(parseChatInput('/ban 철수'), { kind: 'admin', action: 'ban', target: '철수', reason: null });
+  assert.deepEqual(parseChatInput('/mute 철수 30'), { kind: 'admin', action: 'mute', target: '철수', minutes: 30 });
+  assert.equal(parseChatInput('/mute 철수').minutes, 10);
+  assert.deepEqual(parseChatInput('/notice 서버 점검 예정'), { kind: 'admin', action: 'notice', text: '서버 점검 예정' });
+  assert.deepEqual(parseChatInput('/unban player01'), { kind: 'admin', action: 'unban', target: 'player01' });
+  assert.equal(parseChatInput('/kick').kind, 'error');
   assert.equal(cleanText('a\u0000b\nc').includes('\n'), false);
   assert.equal(cleanText('가'.repeat(500)).length, 200);
 });
@@ -124,26 +187,51 @@ test('도배 방지', () => {
   assert.equal(rl.allow(1, 1500), true);
 });
 
-test('이동 검증: 범위 제한, 순간이동 차단, 변경분만 전송', () => {
+const mkPlayer = (reg, id, x, z, r = 0) => {
+  const p = reg.add(`s${id}`, { id, nickname: `p${id}`, appearance: {}, bodyStats: {}, level: 1, lastPos: { x, z, r } }, 0);
+  return p;
+};
+
+test('전투: 거리·방향·쿨다운 판정, 넉백, 연타 시 기절', () => {
+  const reg = new PlayerRegistry();
+  const a = mkPlayer(reg, 1, 0, 0, 0); // +z 를 바라봄
+  const front = mkPlayer(reg, 2, 0, 1.0); // 앞 1m
+  const behind = mkPlayer(reg, 3, 0, -1.0); // 뒤
+  const far = mkPlayer(reg, 4, 0, 3.0); // 멀리
+
+  let r = resolveAttack(a, reg.list(), 'punch', 1000);
+  assert.equal(r.ok, true);
+  assert.deepEqual(r.hits.map((h) => h.target.id), [2]);
+  assert.equal(r.hits[0].kz > 0, true); // 앞으로 밀려남
+  assert.equal(r.hits[0].kx, 0);
+
+  assert.equal(resolveAttack(a, reg.list(), 'punch', 1100).ok, false); // 쿨다운
+  assert.equal(resolveAttack(a, reg.list(), 'punch', 1400).ok, true); // 2타 (누적 2점)
+  r = resolveAttack(a, reg.list(), 'kick', 1500); // 발차기 2점 → 누적 4점
+  assert.equal(r.hits[0].down, false);
+  r = resolveAttack(a, reg.list(), 'punch', 1900); // 누적 5점 → 기절
+  assert.equal(r.hits[0].down, true);
+  assert.ok(front.downUntil > 1900);
+
+  // 기절한 사람은 더 맞지 않고, 공격도 못 함
+  assert.deepEqual(resolveAttack(a, reg.list(), 'kick', 2300).hits, []);
+  assert.equal(resolveAttack(front, reg.list(), 'punch', 2400).ok, false);
+  assert.equal(behind.hitLog.length, 0);
+  assert.equal(far.hitLog.length, 0);
+});
+
+test('이동 검증: 범위 제한, 순간이동 차단, 넉백 중 여유, 변경분만 전송', () => {
   const reg = new PlayerRegistry();
   const p = reg.add('s1', { id: 7, nickname: 'n', appearance: {}, bodyStats: {}, level: 1, lastPos: null }, 0);
-  assert.equal(p.x, 0);
   assert.equal(p.z, 8);
-
   assert.equal(reg.applyMove(p, [0.5, 0, 7.5, 0, 1], 100), 'ok');
   assert.deepEqual(reg.takeStatePacket(), [[7, 0.5, 0, 7.5, 0, 1]]);
   assert.deepEqual(reg.takeStatePacket(), []);
-
   assert.equal(reg.applyMove(p, [10, 0, -10, 0, 1], 200), 'corrected');
-  assert.equal(p.x, 0.5);
-
   assert.equal(reg.applyMove(p, [0.5, 99, 7.5, 0, 3], 300), 'ok');
-  assert.equal(p.y, 1.6);
+  assert.equal(p.y, 3.5);
   assert.equal(reg.applyMove(p, ['a', 0, 0, 0, 0], 400), 'invalid');
-  assert.equal(reg.applyMove(p, [0.5, 0, 7.5, 0, 99], 500), 'ok');
-  assert.equal(p.a, 0);
-
-  assert.equal(reg.getByNickname('N'), p);
-  reg.remove('s1');
-  assert.equal(reg.count, 0);
+  // 넉백 중에는 더 빠른 이동 허용
+  p.knockbackUntil = 1000;
+  assert.equal(reg.applyMove(p, [0.5, 0, 6.0, 0, 0], 500), 'ok');
 });

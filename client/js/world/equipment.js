@@ -1,6 +1,7 @@
 // 운동기구 / 소품 로우폴리 모델 팩토리
 // 각 팩토리는 { group, collider, interactPoint, useFacing } 를 반환합니다.
-//  - collider: 로컬 좌표 XZ 박스 (CollisionWorld 에 등록)
+//  - colliders: 로컬 좌표 XZ 박스 + 윗면 높이(top) 목록 (CollisionWorld 에 등록)
+//    → 낮은 부분(벤치 쿠션 등)은 점프로 올라서거나 넘을 수 있음
 //  - interactPoint: 로컬 좌표, 플레이어가 이 지점 근처에서 E 를 누르면 상호작용
 //  - useFacing: 운동할 때 캐릭터가 바라볼 로컬 방향(라디안) — Phase 4 에서 사용
 import * as THREE from 'three';
@@ -97,7 +98,10 @@ export function createBenchPress() {
   bar.userData.dynamic = true; // Phase 4 에서 움직일 부품 → 정적 병합 제외
   return {
     group: g,
-    collider: { minX: -1.0, maxX: 1.0, minZ: -0.85, maxZ: 0.72 },
+    colliders: [
+      { minX: -0.22, maxX: 0.22, minZ: -0.5, maxZ: 0.7, top: 0.5 }, // 벤치 쿠션 (올라설 수 있음)
+      { minX: -1.0, maxX: 1.0, minZ: -0.75, maxZ: -0.42, top: 1.36 }, // 거치대 + 바벨
+    ],
     interactPoint: { x: 0, z: 1.15 },
     movable: { barbell: bar },
   };
@@ -120,7 +124,7 @@ export function createDumbbellRack() {
   }
   return {
     group: g,
-    collider: { minX: -W / 2 - 0.05, maxX: W / 2 + 0.05, minZ: -0.3, maxZ: 0.3 },
+    colliders: [{ minX: -W / 2 - 0.05, maxX: W / 2 + 0.05, minZ: -0.3, maxZ: 0.3, top: 0.9 }],
     interactPoint: { x: 0, z: 0.95 },
   };
 }
@@ -143,7 +147,10 @@ export function createTreadmill() {
   screen.rotation.x = -0.5;
   return {
     group: g,
-    collider: { minX: -0.45, maxX: 0.45, minZ: -1.05, maxZ: 0.98 },
+    colliders: [
+      { minX: -0.45, maxX: 0.45, minZ: -0.6, maxZ: 0.98, top: 0.2 }, // 발판 (걸어서 올라감)
+      { minX: -0.45, maxX: 0.45, minZ: -1.05, maxZ: -0.6, top: 1.5 }, // 계기판
+    ],
     interactPoint: { x: 0, z: 1.4 },
   };
 }
@@ -168,7 +175,10 @@ export function createLegPress() {
   }
   return {
     group: g,
-    collider: { minX: -0.6, maxX: 0.6, minZ: -1.15, maxZ: 1.15 },
+    colliders: [
+      { minX: -0.6, maxX: 0.6, minZ: 0.2, maxZ: 1.15, top: 0.55 }, // 시트 쪽
+      { minX: -0.6, maxX: 0.6, minZ: -1.15, maxZ: 0.2, top: 1.3 }, // 슬레드
+    ],
     interactPoint: { x: 1.05, z: 0.5 },
   };
 }
@@ -190,7 +200,7 @@ export function createShoulderPress() {
   for (let i = 0; i < 8; i++) box(g, 0.34, 0.06, 0.2, i % 2 ? PALETTE.plate : '#33363d', 0, 0.12 + i * 0.065, -0.45);
   return {
     group: g,
-    collider: { minX: -0.6, maxX: 0.6, minZ: -0.6, maxZ: 0.45 },
+    colliders: [{ minX: -0.6, maxX: 0.6, minZ: -0.6, maxZ: 0.45, top: 1.95 }],
     interactPoint: { x: 0, z: 0.95 },
   };
 }
@@ -212,7 +222,7 @@ export function createLatPulldown() {
   for (let i = 0; i < 10; i++) box(g, 0.34, 0.06, 0.2, i % 2 ? PALETTE.plate : '#33363d', 0, 0.12 + i * 0.065, -0.45);
   return {
     group: g,
-    collider: { minX: -0.62, maxX: 0.62, minZ: -0.8, maxZ: 0.55 },
+    colliders: [{ minX: -0.62, maxX: 0.62, minZ: -0.8, maxZ: 0.55, top: 2.4 }],
     interactPoint: { x: 0, z: 1.05 },
   };
 }
@@ -224,7 +234,7 @@ export function createRestBench(length = 2.0) {
   for (const s of [-1, 1]) {
     box(g, 0.08, 0.42, 0.38, PALETTE.frame, s * (length / 2 - 0.15), 0.21, 0);
   }
-  return { group: g, collider: { minX: -length / 2, maxX: length / 2, minZ: -0.24, maxZ: 0.24 } };
+  return { group: g, colliders: [{ minX: -length / 2, maxX: length / 2, minZ: -0.24, maxZ: 0.24, top: 0.48 }] };
 }
 
 export function createWaterCooler() {
@@ -232,7 +242,7 @@ export function createWaterCooler() {
   box(g, 0.4, 0.95, 0.4, PALETTE.white, 0, 0.475, 0);
   box(g, 0.22, 0.12, 0.05, '#3d7dd8', 0, 0.8, 0.21);
   cyl(g, 0.15, 0.4, '#8fd3ff', 0, 1.15, 0, 'y', 10, { transparent: true, opacity: 0.75 });
-  return { group: g, collider: { minX: -0.25, maxX: 0.25, minZ: -0.25, maxZ: 0.25 } };
+  return { group: g, colliders: [{ minX: -0.25, maxX: 0.25, minZ: -0.25, maxZ: 0.25, top: 1.35 }] };
 }
 
 export function createPlant() {
@@ -243,7 +253,7 @@ export function createPlant() {
   leaves.scale.set(1, 1.3, 1);
   leaves.castShadow = true;
   g.add(leaves);
-  return { group: g, collider: { minX: -0.25, maxX: 0.25, minZ: -0.25, maxZ: 0.25 } };
+  return { group: g, colliders: [{ minX: -0.25, maxX: 0.25, minZ: -0.25, maxZ: 0.25, top: 1.4 }] };
 }
 
 export function createVendingMachine() {
@@ -255,7 +265,7 @@ export function createVendingMachine() {
     for (let c = 0; c < 4; c++) box(g, 0.08, 0.16, 0.04, colors[(r + c) % 4], -0.3 + c * 0.14, 0.85 + r * 0.24, 0.38);
   }
   box(g, 0.14, 0.4, 0.03, '#2b2d33', 0.33, 1.2, 0.36);
-  return { group: g, collider: { minX: -0.48, maxX: 0.48, minZ: -0.38, maxZ: 0.38 } };
+  return { group: g, colliders: [{ minX: -0.48, maxX: 0.48, minZ: -0.38, maxZ: 0.38, top: 1.9 }] };
 }
 
 /**
@@ -292,5 +302,5 @@ export function createSignboard(title, lines) {
   const face = new THREE.Mesh(new THREE.PlaneGeometry(1.36, 1.02), new THREE.MeshBasicMaterial({ map: tex }));
   face.position.set(0, 1.65, 0.002);
   g.add(face);
-  return { group: g, collider: { minX: -0.72, maxX: 0.72, minZ: -0.2, maxZ: 0.2 } };
+  return { group: g, colliders: [{ minX: -0.72, maxX: 0.72, minZ: -0.2, maxZ: 0.2, top: 2.25 }] };
 }

@@ -18,6 +18,8 @@ export function loadConfig(env = process.env) {
     TURSO_AUTH_TOKEN: (env.TURSO_AUTH_TOKEN || '').trim(),
     CLIENT_ORIGIN: parseOrigins(env.CLIENT_ORIGIN),
     MAX_PLAYERS: Math.max(1, Number(env.MAX_PLAYERS) || 20),
+    // 관리자 계정 아이디 (쉼표로 여러 개). 예: ADMIN_USERNAMES=shlimbz,friend01
+    ADMIN_USERNAMES: (env.ADMIN_USERNAMES || '').split(',').map((s) => s.trim()).filter(Boolean),
     // 채팅 도배 방지: WINDOW_MS 동안 최대 MAX 개
     CHAT_RATE_MAX: 5,
     CHAT_RATE_WINDOW_MS: 5000,

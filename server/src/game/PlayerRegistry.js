@@ -16,7 +16,13 @@ export class PlayerRegistry {
     return this.bySocket.size;
   }
 
-  add(socketId, user, now = Date.now()) {
+  /**
+   * @param {string} socketId
+   * @param {object} user 캐릭터
+   * @param {number} now
+   * @param {{accountId?:number, username?:string, admin?:boolean}} account
+   */
+  add(socketId, user, now = Date.now(), account = {}) {
     const start = user.lastPos && inBounds(user.lastPos) ? user.lastPos : SPAWN;
     const player = {
       socketId,
@@ -34,6 +40,13 @@ export class PlayerRegistry {
       dirty: false,
       lastWhisperPartner: null,
       joinedAt: now,
+      accountId: account.accountId ?? null,
+      username: account.username ?? null,
+      admin: !!account.admin,
+      attackAt: {},
+      hitLog: [],
+      downUntil: 0,
+      knockbackUntil: 0,
     };
     this.bySocket.set(socketId, player);
     this.byUser.set(user.id, player);
@@ -66,6 +79,10 @@ export class PlayerRegistry {
     return [...this.bySocket.values()];
   }
 
+  listByAccount(accountId) {
+    return this.list().filter((p) => p.accountId === accountId);
+  }
+
   /** 다른 클라이언트에 보낼 공개 정보 */
   static info(p) {
     return {
@@ -74,6 +91,7 @@ export class PlayerRegistry {
       appearance: p.appearance,
       bodyStats: p.bodyStats,
       level: p.level,
+      admin: p.admin,
       x: round2(p.x), y: round2(p.y), z: round2(p.z), r: round2(p.r), a: p.a,
     };
   }
@@ -90,7 +108,9 @@ export class PlayerRegistry {
 
     // 순간이동/스피드핵 방지: 경과 시간 대비 이동 거리 확인 (네트워크 지연 여유 포함)
     const dt = Math.min(2, Math.max(0.1, (now - player.lastMoveAt) / 1000));
-    const allowed = MAX_MOVE_SPEED * 1.5 * dt + 0.5;
+    // 넉백 직후에는 날아가는 속도를 고려해 여유를 더 줌
+    const boost = now < player.knockbackUntil ? 2 : 1;
+    const allowed = MAX_MOVE_SPEED * 1.5 * boost * dt + 0.5;
     const dist = Math.hypot(x - player.x, z - player.z);
     player.lastMoveAt = now;
     if (dist > allowed) return 'corrected';

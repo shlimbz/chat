@@ -1,17 +1,24 @@
 // 다른 플레이어 표시 + 보간
-// 서버는 초당 10회만 위치를 보내므로, 받은 위치들을 버퍼에 쌓고
-// "현재 시각 - INTERPOLATION_DELAY" 시점의 위치를 두 샘플 사이에서 보간해 부드럽게 그립니다.
+//
+// [버벅임 개선]
+// 이전 방식은 "패킷을 받은 시각" 기준으로 보간했기 때문에, 무료 서버/와이파이에서 패킷이
+// 몰려서 오거나 늦게 오면(지터) 다른 캐릭터가 멈췄다 튀었다 했습니다.
+// 이제는 서버가 패킷에 찍어 보내는 "서버 시각"을 기준으로 일정한 간격의 타임라인을 만들고,
+// 그 타임라인보다 INTERPOLATION_DELAY 만큼 과거를 부드럽게 보간합니다.
+// 데이터가 잠깐 끊기면 마지막 속도로 짧게 예측(외삽)해서 멈칫하지 않게 합니다.
 import { CharacterModel } from '../character/CharacterModel.js';
 import { CONFIG } from '../config.js';
 import { lerpAngle } from '../character/PlayerController.js';
 
-const MAX_BUFFER = 30;
+const MAX_BUFFER = 40;
+const MAX_EXTRAPOLATE_MS = 150;
 
 class RemotePlayer {
   constructor(info, opts) {
     this.id = info.id;
     this.nickname = info.nickname;
-    this.model = new CharacterModel(info.appearance, { nickname: info.nickname, blobShadow: opts.blobShadow });
+    this.admin = !!info.admin;
+    this.model = new CharacterModel(info.appearance, { nickname: info.nickname, blobShadow: opts.blobShadow, admin: this.admin });
     if (info.bodyStats) this.model.setBodyStats(info.bodyStats);
     this.model.setCastShadow(opts.castShadow);
     if (this.model.nameTag) this.model.nameTag.visible = opts.showNameTags;
@@ -19,34 +26,50 @@ class RemotePlayer {
     this.pos = { x: info.x, y: info.y || 0, z: info.z };
     this.rot = info.r || 0;
     this.speed = 0;
-    this.push(info.x, info.y || 0, info.z, info.r || 0, performance.now() - CONFIG.INTERPOLATION_DELAY_MS);
+    this.visible = true;
     this._apply();
   }
 
-  push(x, y, z, r, t = performance.now()) {
+  /** t: 로컬 시계로 환산된 서버 시각 */
+  push(x, y, z, r, t) {
+    const last = this.buffer[this.buffer.length - 1];
+    if (last && t <= last.t) return; // 순서가 뒤바뀐 패킷 무시
     this.buffer.push({ t, x, y, z, r });
     if (this.buffer.length > MAX_BUFFER) this.buffer.shift();
   }
 
-  update(dt, now) {
-    const renderT = now - CONFIG.INTERPOLATION_DELAY_MS;
+  update(dt, renderT) {
     const b = this.buffer;
-    // renderT 이전의 가장 최근 샘플 하나만 남기고 정리
-    while (b.length >= 2 && b[1].t <= renderT) b.shift();
+    while (b.length >= 3 && b[1].t <= renderT) b.shift();
 
     const prevX = this.pos.x;
     const prevZ = this.pos.z;
-    if (b.length >= 2 && b[0].t <= renderT) {
+    if (b.length >= 2 && b[0].t <= renderT && renderT <= b[1].t) {
+      // 두 샘플 사이 보간
       const a = b[0];
       const c = b[1];
-      const k = Math.min(1, (renderT - a.t) / Math.max(1, c.t - a.t));
+      const k = (renderT - a.t) / Math.max(1, c.t - a.t);
       this.pos.x = a.x + (c.x - a.x) * k;
       this.pos.y = a.y + (c.y - a.y) * k;
       this.pos.z = a.z + (c.z - a.z) * k;
       this.rot = lerpAngle(a.r, c.r, k);
+    } else if (b.length >= 2 && renderT > b[b.length - 1].t) {
+      // 최신 데이터보다 앞 → 마지막 속도로 짧게 예측 (그 이후는 멈춤)
+      const c = b[b.length - 1];
+      const a = b[b.length - 2];
+      const span = Math.max(1, c.t - a.t);
+      const ahead = Math.min(MAX_EXTRAPOLATE_MS, renderT - c.t);
+      const moving = Math.hypot(c.x - a.x, c.z - a.z) > 0.001 && span < 400;
+      const k = moving ? ahead / span : 0;
+      const tx = c.x + (c.x - a.x) * k;
+      const tz = c.z + (c.z - a.z) * k;
+      const f = Math.min(1, dt * 15);
+      this.pos.x += (tx - this.pos.x) * f;
+      this.pos.z += (tz - this.pos.z) * f;
+      this.pos.y += (c.y - this.pos.y) * f;
+      this.rot = lerpAngle(this.rot, c.r, f);
     } else if (b.length) {
       const last = b[b.length - 1];
-      // 새 데이터가 없으면 마지막 위치로 부드럽게 수렴
       const f = Math.min(1, dt * 12);
       this.pos.x += (last.x - this.pos.x) * f;
       this.pos.y += (last.y - this.pos.y) * f;
@@ -55,9 +78,18 @@ class RemotePlayer {
     }
     const moved = Math.hypot(this.pos.x - prevX, this.pos.z - prevZ);
     const instSpeed = dt > 0 ? moved / dt : 0;
-    this.speed += (instSpeed - this.speed) * Math.min(1, dt * 10);
+    this.speed += (instSpeed - this.speed) * Math.min(1, dt * 8);
     this._apply();
-    this.model.update(dt, this.speed < 0.08 ? 0 : this.speed, this.pos.y > 0.03);
+    if (this.visible) this.model.update(dt, this.speed < 0.15 ? 0 : this.speed, this.pos.y > 0.05 && this._airborne());
+  }
+
+  _airborne() {
+    // 물체 위에 서 있는 것과 점프를 구분: 높이가 변하는 중이면 공중
+    const b = this.buffer;
+    if (b.length < 2) return this.pos.y > 0.05;
+    const c = b[b.length - 1];
+    const a = b[b.length - 2];
+    return Math.abs(c.y - a.y) > 0.01 || this.model.airBlend > 0.5;
   }
 
   _apply() {
@@ -75,6 +107,7 @@ export class RemotePlayers {
     this.scene = scene;
     this.map = new Map();
     this.opts = { blobShadow: true, castShadow: false, showNameTags: true };
+    this.clockOffset = null; // 로컬시계 - 서버시계 (가장 빨리 도착한 패킷 기준)
   }
 
   get count() {
@@ -85,10 +118,15 @@ export class RemotePlayers {
     return [...this.map.values()];
   }
 
+  get(id) {
+    return this.map.get(id) || null;
+  }
+
   /** 전체 목록으로 교체 (접속/재접속 직후) */
   reset(players) {
     for (const p of this.map.values()) p.dispose();
     this.map.clear();
+    this.clockOffset = null;
     for (const info of players) this.add(info);
   }
 
@@ -112,14 +150,19 @@ export class RemotePlayers {
     this.map.get(id)?.model.setAppearance(appearance);
   }
 
-  /** 서버 STATE 패킷: [[id, x, y, z, r, a], ...] */
+  /** 서버 STATE 패킷: { t: 서버시각, p: [[id, x, y, z, r, a], ...] } */
   applyState(packet, selfId) {
-    if (!Array.isArray(packet)) return;
+    if (!packet || !Array.isArray(packet.p)) return;
     const now = performance.now();
-    for (const row of packet) {
+    const sample = now - Number(packet.t);
+    // 지연이 가장 적었던 패킷 기준으로 시계를 맞춤 (천천히 따라가 시계 오차도 보정)
+    if (this.clockOffset === null || sample < this.clockOffset) this.clockOffset = sample;
+    else this.clockOffset += Math.min(sample - this.clockOffset, 0.5);
+    const t = Number(packet.t) + this.clockOffset;
+    for (const row of packet.p) {
       if (!Array.isArray(row) || row[0] === selfId) continue;
       const p = this.map.get(row[0]);
-      if (p) p.push(row[1], row[2], row[3], row[4], now);
+      if (p) p.push(row[1], row[2], row[3], row[4], t);
     }
   }
 
@@ -132,9 +175,13 @@ export class RemotePlayers {
     }
   }
 
-  update(dt) {
-    const now = performance.now();
-    for (const p of this.map.values()) p.update(dt, now);
+  /**
+   * @param {number} dt
+   * @param {{x:number,z:number}} [viewer] 내 위치 — 멀리 있는 캐릭터는 애니메이션 계산을 줄임
+   */
+  update(dt, viewer) {
+    const renderT = performance.now() - CONFIG.INTERPOLATION_DELAY_MS;
+    for (const p of this.map.values()) p.update(dt, renderT);
   }
 
   findByNickname(name) {

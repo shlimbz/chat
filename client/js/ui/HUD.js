@@ -43,6 +43,7 @@ export class HUD {
       el('span', { html: '<b>드래그</b> 카메라' }),
       el('span', { html: '<b>휠</b> 줌' }),
       el('span', { html: '<b>E</b> 기구 이용' }),
+      el('span', { html: '<b>F</b> 주먹 <b>G</b> 발차기' }),
       el('span', { html: '<b>Enter</b> 채팅' }),
       el('span', { html: '<b>ESC</b> 메뉴' }),
     ]);
@@ -61,9 +62,13 @@ export class HUD {
     setTimeout(() => this.helpEl.classList.add('fade'), 12000);
   }
 
-  setPlayer(nickname, level = 1) {
+  setPlayer(nickname, level = 1, admin = false) {
     this.nameEl.textContent = nickname;
     this.levelEl.textContent = `Lv.${level}`;
+    if (admin && !this.adminEl) {
+      this.adminEl = el('span', { class: 'admin-badge', text: '관리자' });
+      this.nameEl.after(this.adminEl);
+    }
   }
 
   /** @param {{count:number, max?:number, label?:string, state:'online'|'warn'|'offline'}} o */

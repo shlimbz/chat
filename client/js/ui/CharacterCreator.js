@@ -1,7 +1,6 @@
 // 캐릭터 생성 / 커스터마이징 화면 (실시간 3D 미리보기 포함)
-import * as THREE from 'three';
 import { el } from './dom.js';
-import { CharacterModel } from '../character/CharacterModel.js';
+import { getCharacterPreview } from './CharacterPreview.js';
 import {
   BODY_PRESETS, SKIN_COLORS, HAIR_STYLES, HAIR_COLORS, FACE_SHAPES, OUTFITS, CLOTH_COLORS, SHOES, SHOE_COLORS,
   DEFAULT_APPEARANCE, sanitizeAppearance, randomAppearance, validateNickname, NICKNAME_MAX,
@@ -27,30 +26,37 @@ export class CharacterCreator {
     this.appearance = { ...DEFAULT_APPEARANCE };
     this.mode = 'create';
     this._resolve = null;
-    this._raf = 0;
+    this._onSubmit = null;
     this._buildDom();
-    this._buildPreview();
+    this.preview = getCharacterPreview();
   }
 
   /**
-   * @param {{mode:'create'|'edit', profile?:{nickname:string, appearance:object}}} opts
+   * @param {{mode:'create'|'edit', profile?:{nickname:string, appearance:object}, error?:string,
+   *          submitLabel?:string, cancelable?:boolean,
+   *          onSubmit?:(result:{nickname:string, appearance:object})=>Promise<string|null>}} opts
+   *   onSubmit: 서버 저장 등 — 오류 문구를 반환하면 화면에 표시하고 닫지 않음
    * @returns {Promise<{nickname:string, appearance:object}|null>} 취소 시 null
    */
-  open({ mode = 'create', profile = null, error = '' } = {}) {
+  open({
+    mode = 'create', profile = null, error = '', submitLabel, cancelable, onSubmit = null,
+  } = {}) {
     this.mode = mode;
+    this._onSubmit = onSubmit;
     this.appearance = sanitizeAppearance(profile?.appearance || DEFAULT_APPEARANCE);
     this.nickInput.value = profile?.nickname || '';
     this.nickInput.disabled = mode === 'edit';
     this.errorEl.textContent = error;
-    this.titleEl.textContent = mode === 'edit' ? '캐릭터 커스터마이징' : '캐릭터 만들기';
-    this.submitBtn.textContent = mode === 'edit' ? '저장하기' : '헬스장 입장하기';
-    this.cancelBtn.classList.toggle('hidden', mode !== 'edit');
+    this.titleEl.textContent = mode === 'edit' ? '캐릭터 꾸미기' : '새 캐릭터 만들기';
+    this.submitBtn.textContent = submitLabel || (mode === 'edit' ? '저장하기' : '헬스장 입장하기');
+    this.submitBtn.disabled = false;
+    this.cancelBtn.classList.toggle('hidden', !(cancelable ?? mode === 'edit'));
     this._refreshSelections();
-    this.model.setAppearance(this.appearance);
     this.overlay.classList.remove('hidden');
-    this._resize();
-    this._startLoop();
-    if (mode === 'create') setTimeout(() => this.nickInput.focus(), 50);
+    this.preview.mount(this.previewSlot);
+    this.preview.setVisible(true);
+    this.preview.setAppearance(this.appearance);
+    if (mode === 'create' && !window.matchMedia('(pointer: coarse)').matches) setTimeout(() => this.nickInput.focus(), 50);
     return new Promise((resolve) => { this._resolve = resolve; });
   }
 
@@ -60,8 +66,7 @@ export class CharacterCreator {
 
   close(result = null) {
     this.overlay.classList.add('hidden');
-    cancelAnimationFrame(this._raf);
-    this._raf = 0;
+    this.preview.stop();
     const r = this._resolve;
     this._resolve = null;
     if (r) r(result);
@@ -107,13 +112,9 @@ export class CharacterCreator {
       el('div', { class: 'creator-actions' }, [randomBtn, this.cancelBtn, this.submitBtn]),
     ]);
 
-    this.previewCanvas = el('canvas', { class: 'creator-canvas' });
-    const previewWrap = el('div', { class: 'creator-preview' }, [
-      this.previewCanvas,
-      el('div', { class: 'creator-hint', text: '드래그해서 돌려보기' }),
-    ]);
+    this.previewSlot = el('div', { class: 'creator-preview' });
 
-    this.overlay = el('div', { id: 'creator', class: 'overlay hidden' }, [el('div', { class: 'creator-wrap' }, [panel, previewWrap])]);
+    this.overlay = el('div', { id: 'creator', class: 'overlay hidden' }, [el('div', { class: 'creator-wrap' }, [panel, this.previewSlot])]);
     this.overlay.addEventListener('keydown', (e) => {
       if (e.key === 'Escape' && this.mode === 'edit') { e.stopPropagation(); this.close(null); }
     });
@@ -123,13 +124,13 @@ export class CharacterCreator {
   _set(key, value) {
     this.appearance = sanitizeAppearance({ ...this.appearance, [key]: value });
     this._refreshSelections();
-    this.model.setAppearance(this.appearance);
+    this.preview.setAppearance(this.appearance);
   }
 
   _randomize() {
     this.appearance = sanitizeAppearance(randomAppearance());
     this._refreshSelections();
-    this.model.setAppearance(this.appearance);
+    this.preview.setAppearance(this.appearance);
   }
 
   _refreshSelections() {
@@ -140,87 +141,31 @@ export class CharacterCreator {
     }
   }
 
-  _submit() {
-    const nick = validateNickname(this.nickInput.value);
+  async _submit() {
+    const nick = this.mode === 'edit' ? { ok: true, value: this.nickInput.value } : validateNickname(this.nickInput.value);
     if (!nick.ok) {
       this.errorEl.textContent = nick.error;
       this.nickInput.focus();
       return;
     }
-    this.close({ nickname: nick.value, appearance: { ...this.appearance } });
-  }
-
-  // ── 3D 미리보기 ───────────────────────────────────────
-  _buildPreview() {
-    const renderer = new THREE.WebGLRenderer({ canvas: this.previewCanvas, antialias: true, alpha: true });
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
-    this.renderer = renderer;
-
-    const scene = new THREE.Scene();
-    this.scene = scene;
-    this.camera = new THREE.PerspectiveCamera(32, 1, 0.1, 50);
-    this.camera.position.set(0, 1.0, 4.0);
-    this.camera.lookAt(0, 0.74, 0);
-
-    scene.add(new THREE.HemisphereLight('#ffffff', '#b9a990', 2.0));
-    const key = new THREE.DirectionalLight('#fff3e0', 2.2);
-    key.position.set(2, 4, 3);
-    scene.add(key);
-    const rim = new THREE.DirectionalLight('#cfe0ff', 1.0);
-    rim.position.set(-3, 2, -2);
-    scene.add(rim);
-
-    const base = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.75, 0.85, 0.12, 24),
-      new THREE.MeshLambertMaterial({ color: '#f6d55c', flatShading: true }),
-    );
-    base.position.y = -0.06;
-    scene.add(base);
-
-    this.model = new CharacterModel(this.appearance);
-    this.model.root.rotation.y = 0.35;
-    scene.add(this.model.root);
-
-    // 드래그 회전
-    let dragging = false;
-    let lastX = 0;
-    this._userRotated = 0;
-    this.previewCanvas.addEventListener('pointerdown', (e) => {
-      dragging = true; lastX = e.clientX; this.previewCanvas.setPointerCapture(e.pointerId);
-    });
-    this.previewCanvas.addEventListener('pointermove', (e) => {
-      if (!dragging) return;
-      this.model.root.rotation.y += (e.clientX - lastX) * 0.012;
-      lastX = e.clientX;
-      this._userRotated = 3;
-    });
-    const stop = () => { dragging = false; };
-    this.previewCanvas.addEventListener('pointerup', stop);
-    this.previewCanvas.addEventListener('pointercancel', stop);
-    window.addEventListener('resize', () => { if (this.isOpen()) this._resize(); });
-  }
-
-  _resize() {
-    const rect = this.previewCanvas.parentElement.getBoundingClientRect();
-    const w = Math.max(100, Math.floor(rect.width));
-    const h = Math.max(100, Math.floor(rect.height));
-    this.renderer.setSize(w, h, false);
-    this.camera.aspect = w / h;
-    this.camera.updateProjectionMatrix();
-  }
-
-  _startLoop() {
-    cancelAnimationFrame(this._raf);
-    let last = performance.now();
-    const tick = (now) => {
-      const dt = Math.min(0.05, (now - last) / 1000);
-      last = now;
-      if (this._userRotated > 0) this._userRotated -= dt;
-      else this.model.root.rotation.y += dt * 0.5;
-      this.model.update(dt, 0);
-      this.renderer.render(this.scene, this.camera);
-      this._raf = requestAnimationFrame(tick);
-    };
-    this._raf = requestAnimationFrame(tick);
+    const result = { nickname: nick.value, appearance: { ...this.appearance } };
+    if (this._onSubmit) {
+      this.submitBtn.disabled = true;
+      const label = this.submitBtn.textContent;
+      this.submitBtn.textContent = '저장 중…';
+      let err = null;
+      try {
+        err = await this._onSubmit(result);
+      } catch (e) {
+        err = e?.message || '저장하지 못했습니다.';
+      }
+      this.submitBtn.disabled = false;
+      this.submitBtn.textContent = label;
+      if (err) {
+        this.errorEl.textContent = err;
+        return;
+      }
+    }
+    this.close(result);
   }
 }

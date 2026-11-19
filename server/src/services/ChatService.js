@@ -1,6 +1,7 @@
 // 채팅 저장/조회 + 명령어 해석
 // 저장 항목: 발신자 ID, 수신자 ID, 메시지, 전송 시각, 메시지 유형
 import { CHAT_MAX_LENGTH, CHAT_PAGE_SIZE, CHAT_TYPES } from '../../../client/js/shared/protocol.js';
+import { displayNickname } from './CharacterService.js';
 
 /** 제어문자 제거, 공백 정리, 길이 제한 */
 export function cleanText(raw) {
@@ -11,7 +12,7 @@ export function cleanText(raw) {
 
 /**
  * 채팅 입력 해석 (마인크래프트 방식 명령어)
- * @returns {{kind:'global',text:string}|{kind:'whisper',target:string,text:string}|{kind:'reply',text:string}|{kind:'help'}|{kind:'who'}|{kind:'empty'}|{kind:'error',error:string}}
+ * @returns {{kind:'global'|'whisper'|'reply'|'help'|'who'|'empty'|'error'|'admin', [k:string]:any}}
  */
 export function parseChatInput(raw) {
   const text = cleanText(raw);
@@ -40,6 +41,37 @@ export function parseChatInput(raw) {
       if (!body) return { kind: 'error', error: '사용법: /r 메시지 (마지막 귓속말 상대에게 답장)' };
       return { kind: 'reply', text: body };
     }
+    // ── 관리자 명령어 (권한 확인은 서버 처리부에서) ──
+    case '/kick':
+    case '/ban':
+    case '/delchar': {
+      const [target, ...why] = rest;
+      if (!target) return { kind: 'error', error: `사용법: ${cmd} 닉네임${cmd === '/delchar' ? '' : ' [사유]'}` };
+      return { kind: 'admin', action: cmd.slice(1), target, reason: why.join(' ').trim() || null };
+    }
+    case '/unban':
+    case '/deluser': {
+      const [target] = rest;
+      if (!target) return { kind: 'error', error: `사용법: ${cmd} 계정아이디` };
+      return { kind: 'admin', action: cmd.slice(1), target };
+    }
+    case '/mute': {
+      const [target, mins] = rest;
+      if (!target) return { kind: 'error', error: '사용법: /mute 닉네임 [분, 기본 10]' };
+      const minutes = Math.min(1440, Math.max(1, Number.parseInt(mins, 10) || 10));
+      return { kind: 'admin', action: 'mute', target, minutes };
+    }
+    case '/unmute': {
+      const [target] = rest;
+      if (!target) return { kind: 'error', error: '사용법: /unmute 닉네임' };
+      return { kind: 'admin', action: 'unmute', target };
+    }
+    case '/notice':
+    case '/공지': {
+      const body = rest.join(' ').trim();
+      if (!body) return { kind: 'error', error: '사용법: /notice 공지내용' };
+      return { kind: 'admin', action: 'notice', text: body };
+    }
     default:
       return { kind: 'error', error: `알 수 없는 명령어입니다: ${cmd} (/help 로 목록 확인)` };
   }
@@ -52,6 +84,16 @@ export const HELP_TEXT = [
   '/who — 현재 접속자 목록',
   '/help — 명령어 안내',
   '채팅창의 닉네임을 클릭하면 귓속말을 시작합니다.',
+];
+
+export const ADMIN_HELP_TEXT = [
+  '관리자 명령어',
+  '/kick 닉네임 [사유] — 추방 (다시 접속 가능)',
+  '/ban 닉네임 [사유] — 그 캐릭터의 계정 이용 제한 + 추방',
+  '/unban 계정아이디 — 이용 제한 해제',
+  '/mute 닉네임 [분] — 채팅 금지 (기본 10분) · /unmute 닉네임',
+  '/notice 내용 — 전체 공지',
+  '/delchar 닉네임 — 캐릭터 삭제 · /deluser 계정아이디 — 계정 삭제',
 ];
 
 const SELECT = `SELECT m.id, m.type, m.message, m.created_at, m.sender_id, m.receiver_id,
@@ -70,8 +112,8 @@ export class ChatService {
     return {
       id: Number(row.id),
       type: row.type,
-      from: row.sender,
-      to: row.receiver || null,
+      from: displayNickname(row.sender),
+      to: row.receiver ? displayNickname(row.receiver) : null,
       text: row.message,
       time: Number(row.created_at),
     };
@@ -79,6 +121,11 @@ export class ChatService {
 
   static system(text) {
     return { id: null, type: CHAT_TYPES.SYSTEM, from: null, to: null, text, time: Date.now() };
+  }
+
+  /** 관리자 공지 (저장하지 않음) */
+  static notice(from, text) {
+    return { id: null, type: CHAT_TYPES.NOTICE, from, to: null, text, time: Date.now() };
   }
 
   /**
@@ -92,7 +139,9 @@ export class ChatService {
       'INSERT INTO chat_messages (type, sender_id, receiver_id, message, created_at) VALUES (?, ?, ?, ?, ?) RETURNING id',
       [type, sender.id, receiver ? receiver.id : null, text, now],
     );
-    return { id: Number(row.id), type, from: sender.nickname, to: receiver ? receiver.nickname : null, text, time: now };
+    return {
+      id: Number(row.id), type, from: sender.nickname, to: receiver ? receiver.nickname : null, text, time: now, admin: !!sender.admin,
+    };
   }
 
   saveGlobal(sender, text) {
@@ -132,7 +181,7 @@ export class ChatService {
        GROUP BY u.id ORDER BY lastId DESC LIMIT 50`,
       [userId, userId, userId],
     );
-    return rows.map((r) => ({ nickname: r.nickname, lastId: Number(r.lastId) }));
+    return rows.filter((r) => !String(r.nickname).startsWith('__deleted_')).map((r) => ({ nickname: r.nickname, lastId: Number(r.lastId) }));
   }
 
   async whispersBetween(userId, otherId, beforeId, limit = CHAT_PAGE_SIZE) {

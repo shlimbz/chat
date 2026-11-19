@@ -90,7 +90,7 @@ const UP = new THREE.Vector3(0, 1, 0);
 export class CharacterModel {
   /**
    * @param {object} appearance
-   * @param {{nickname?:string, blobShadow?:boolean}} opts
+   * @param {{nickname?:string, blobShadow?:boolean, admin?:boolean}} opts
    */
   constructor(appearance = DEFAULT_APPEARANCE, opts = {}) {
     this.root = new THREE.Group();
@@ -105,6 +105,12 @@ export class CharacterModel {
     this.airBlend = 0;
     this.landT = 0;
     this._wasAirborne = false;
+    // 전투 모션
+    this.attack = null; // { type, t, dur, side }
+    this._punchSide = 1;
+    this.flinchT = 0;
+    this.downT = 0; // 남은 기절 시간(초)
+    this.downBlend = 0;
     this.time = Math.random() * 10;
     this.action = 'idle'; // 네트워크 동기화용 (idle | walk | run | exercise:*)
 
@@ -120,7 +126,8 @@ export class CharacterModel {
     this._build();
 
     this.nameTag = null;
-    if (opts.nickname) this.setNickname(opts.nickname);
+    // 관리자는 이름표를 금색 ★ 로 표시
+    if (opts.nickname) this.setNickname(opts.admin ? `★ ${opts.nickname}` : opts.nickname, opts.admin ? '#ffd84a' : '#ffffff');
   }
 
   // ── 공개 API ───────────────────────────────────────────
@@ -171,6 +178,28 @@ export class CharacterModel {
     this.nameTag = sprite;
     this.root.add(sprite);
     this._placeNameTag();
+  }
+
+  /** 주먹(좌우 번갈아) / 발차기 모션 시작 */
+  playAttack(type) {
+    const dur = type === 'kick' ? 0.48 : 0.33;
+    if (type === 'punch') this._punchSide *= -1;
+    this.attack = { type, t: 0, dur, side: this._punchSide };
+  }
+
+  /** 맞았을 때 움찔 */
+  flinch() {
+    this.flinchT = 0.28;
+  }
+
+  /** 넘어져서 기절 (머리 위에 별이 빙글빙글) */
+  knockDown(ms) {
+    this.downT = ms / 1000;
+    if (!this.stars) {
+      this.stars = makeDizzyStars();
+      this.root.add(this.stars);
+    }
+    this.stars.visible = true;
   }
 
   /**
@@ -224,6 +253,68 @@ export class CharacterModel {
     p.torsoMesh.scale.set(1 - breathe * 0.5, 1 + breathe, 1 - breathe * 0.5);
     p.head.rotation.z = Math.sin(this.time * 1.3) * 0.05 * (1 - m) - s * 0.04 * m;
     p.head.rotation.x = -0.08 * r * m - 0.12 * air;
+    p.torso.rotation.y = 0;
+
+    this._applyCombatPose(dt, p);
+  }
+
+  _applyCombatPose(dt, p) {
+    // ── 공격 ──
+    if (this.attack) {
+      const a = this.attack;
+      a.t += dt;
+      const k = a.t / a.dur;
+      if (k >= 1) {
+        this.attack = null;
+      } else {
+        // 빠르게 뻗고 → 잠깐 멈췄다가 → 돌아옴
+        const ext = k < 0.3 ? easeOut(k / 0.3) : k < 0.55 ? 1 : 1 - easeIn((k - 0.55) / 0.45);
+        if (a.type === 'punch') {
+          const arm = a.side > 0 ? p.armR : p.armL;
+          const guard = a.side > 0 ? p.armL : p.armR;
+          arm.rotation.x = lerp(arm.rotation.x, -1.6, ext);
+          arm.rotation.z = lerp(arm.rotation.z, a.side * 0.05, ext);
+          guard.rotation.x = lerp(guard.rotation.x, -0.9, ext * 0.8);
+          guard.rotation.z = lerp(guard.rotation.z, -a.side * 0.15, ext * 0.8);
+          p.torso.rotation.y = -a.side * 0.38 * ext;
+        } else {
+          p.legR.rotation.x = lerp(p.legR.rotation.x, -1.55, ext);
+          p.legL.rotation.x = lerp(p.legL.rotation.x, 0.15, ext);
+          p.torso.rotation.x -= 0.28 * ext;
+          p.armL.rotation.z = lerp(p.armL.rotation.z, -0.9, ext);
+          p.armR.rotation.z = lerp(p.armR.rotation.z, 0.9, ext);
+        }
+      }
+    }
+    // ── 피격 움찔 ──
+    if (this.flinchT > 0) {
+      this.flinchT = Math.max(0, this.flinchT - dt);
+      const f = Math.sin((this.flinchT / 0.28) * Math.PI);
+      p.torso.rotation.x -= 0.35 * f;
+      p.head.rotation.x -= 0.3 * f;
+      p.armL.rotation.z -= 0.5 * f;
+      p.armR.rotation.z += 0.5 * f;
+    }
+    // ── 기절 (뒤로 벌러덩) ──
+    if (this.downT > 0) this.downT = Math.max(0, this.downT - dt);
+    const target = this.downT > 0 ? 1 : 0;
+    this.downBlend += (target - this.downBlend) * Math.min(1, dt * (target ? 10 : 5));
+    const d = this.downBlend;
+    this.body.rotation.x = -Math.PI / 2 * d;
+    this.body.position.y = 0.24 * d * this.body.scale.y;
+    if (d > 0.01) {
+      p.armL.rotation.z = lerp(p.armL.rotation.z, -1.2, d);
+      p.armR.rotation.z = lerp(p.armR.rotation.z, 1.2, d);
+      p.legL.rotation.x = lerp(p.legL.rotation.x, 0.15, d);
+      p.legR.rotation.x = lerp(p.legR.rotation.x, -0.15, d);
+    }
+    if (this.stars) {
+      this.stars.visible = this.downT > 0;
+      if (this.stars.visible) {
+        this.stars.rotation.y += dt * 4;
+        this.stars.position.set(0, 0.55, -(this.height || 1.5) * 0.85);
+      }
+    }
   }
 
   dispose() {
@@ -474,6 +565,44 @@ export class CharacterModel {
   _placeNameTag() {
     if (this.nameTag) this.nameTag.position.y = (this.height || 1.5) + 0.28;
   }
+}
+
+const lerp = (a, b, t) => a + (b - a) * t;
+const easeOut = (t) => 1 - (1 - t) * (1 - t);
+const easeIn = (t) => t * t;
+
+// 기절 별 (모든 캐릭터가 텍스처·재질 공유)
+let starMaterial = null;
+function makeDizzyStars() {
+  if (!starMaterial) {
+    const c = document.createElement('canvas');
+    c.width = c.height = 64;
+    const ctx = c.getContext('2d');
+    ctx.fillStyle = '#ffd84a';
+    ctx.strokeStyle = '#b8860b';
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    for (let i = 0; i < 10; i++) {
+      const rr = i % 2 === 0 ? 28 : 12;
+      const ang = -Math.PI / 2 + (i * Math.PI) / 5;
+      ctx.lineTo(32 + Math.cos(ang) * rr, 32 + Math.sin(ang) * rr);
+    }
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+    const tex = new THREE.CanvasTexture(c);
+    tex.colorSpace = THREE.SRGBColorSpace;
+    starMaterial = new THREE.SpriteMaterial({ map: tex, transparent: true, depthWrite: false });
+  }
+  const g = new THREE.Group();
+  for (let i = 0; i < 3; i++) {
+    const sp = new THREE.Sprite(starMaterial);
+    const ang = (i / 3) * Math.PI * 2;
+    sp.position.set(Math.cos(ang) * 0.28, 0, Math.sin(ang) * 0.28);
+    sp.scale.setScalar(0.2);
+    g.add(sp);
+  }
+  return g;
 }
 
 function roundRect(ctx, x, y, w, h, r) {

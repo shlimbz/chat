@@ -21,6 +21,7 @@ export class ChatPanel {
    */
   constructor(slot, handlers = {}) {
     this.h = handlers;
+    this.expanded = false;
     this.net = null;
     this.selfName = '';
     this.seenIds = new Set();
@@ -36,7 +37,9 @@ export class ChatPanel {
     this.tabWhisper = el('button', { class: 'chat-tab', attrs: { type: 'button' }, text: '귓속말', on: { click: () => this.setTab('whisper') } });
     this.unreadEl = el('span', { class: 'chat-unread hidden' });
     this.toggleBtn = el('button', { class: 'chat-toggle', attrs: { type: 'button', title: '채팅창 접기/펼치기' }, text: '▾', on: { click: () => this.setCollapsed(!this.collapsed) } });
-    const head = el('div', { class: 'chat-head' }, [this.tabAll, this.tabWhisper, this.unreadEl, el('span', { class: 'chat-spacer' }), this.toggleBtn]);
+    // 모바일: 채팅 모드(크게 보기) 전환 버튼
+    this.expandBtn = el('button', { class: `chat-toggle chat-expand${handlers.mobile ? '' : ' hidden'}`, attrs: { type: 'button', title: '채팅 모드' }, text: '⤢', on: { click: () => this.setExpanded(!this.expanded) } });
+    const head = el('div', { class: 'chat-head' }, [this.tabAll, this.tabWhisper, this.unreadEl, el('span', { class: 'chat-spacer' }), this.expandBtn, this.toggleBtn]);
 
     // 전체 로그
     this.moreBtn = el('button', { class: 'chat-more', attrs: { type: 'button' }, text: '↑ 이전 기록 불러오기', on: { click: () => this.loadOlder() } });
@@ -136,10 +139,15 @@ export class ChatPanel {
       line.append(el('span', { class: 'chat-text', text: m.text }));
       return line;
     }
+    if (m.type === CHAT_TYPES.NOTICE) {
+      line.append(el('span', { class: 'chat-badge chat-badge-notice', text: '공지' }), el('span', { class: 'chat-text', text: m.text }));
+      return line;
+    }
     if (m.type === CHAT_TYPES.WHISPER) {
       line.append(el('span', { class: 'chat-badge', text: '귓속말' }));
       line.append(this._nameEl(m.from), el('span', { class: 'chat-arrow', text: '→' }), this._nameEl(m.to));
     } else {
+      if (m.admin) line.append(el('span', { class: 'chat-badge chat-badge-admin', text: '관리자' }));
       line.append(this._nameEl(m.from));
     }
     line.append(el('span', { class: 'chat-sep', text: ':' }), el('span', { class: 'chat-text', text: m.text }));
@@ -148,6 +156,7 @@ export class ChatPanel {
 
   _nameEl(name) {
     const self = name === this.selfName;
+    if (!name || name.startsWith('(')) return el('span', { class: 'chat-name deleted', text: name || '?' });
     const n = el('span', { class: `chat-name${self ? ' self' : ''}`, text: self ? `${name}(나)` : name });
     if (!self) {
       n.title = `${name}님에게 귓속말`;
@@ -268,6 +277,18 @@ export class ChatPanel {
     } catch {
       this.whisperLog.append(el('div', { class: 'chat-hint', text: '기록을 불러오지 못했습니다.' }));
     }
+  }
+
+  /** 모바일 채팅 모드: 채팅창을 화면 대부분으로 크게 */
+  setExpanded(v) {
+    if (this.expanded === v) return;
+    this.expanded = v;
+    this.root.classList.toggle('expanded', v);
+    this.expandBtn.textContent = v ? '✕' : '⤢';
+    if (v && this.collapsed) this.setCollapsed(false);
+    if (!v) this.blur();
+    this._scrollBottom(this.tab === 'all' ? this.logAll : this.logWhisper);
+    this.h.onExpandChange?.(v);
   }
 
   // ── 접기 / 흐리게 ─────────────────────────────────────

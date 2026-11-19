@@ -53,6 +53,8 @@ export class NetworkClient {
 
       const socket = io(this.url, {
         auth: (cb) => cb({ v: PROTOCOL_VERSION, ...this.getAuth() }),
+        // 처음부터 웹소켓으로 연결 (HTTP 폴링을 거치면 무료 서버에서 위치 패킷이 몰리거나 늦어져 버벅임)
+        transports: ['websocket'],
         reconnectionDelay: 1000,
         reconnectionDelayMax: 5000,
         timeout: CONFIG.CONNECT_TIMEOUT_MS,
@@ -60,7 +62,7 @@ export class NetworkClient {
       this.socket = socket;
 
       // 서버 이벤트를 등록된 핸들러로 전달
-      for (const ev of [EV.PLAYER_JOIN, EV.PLAYER_LEAVE, EV.PLAYER_APPEARANCE, EV.STATE, EV.CORRECT, EV.CHAT]) {
+      for (const ev of [EV.PLAYER_JOIN, EV.PLAYER_LEAVE, EV.PLAYER_APPEARANCE, EV.STATE, EV.CORRECT, EV.CHAT, EV.ATTACK_FX, EV.HIT]) {
         socket.on(ev, (data) => this._emitLocal(ev, data));
       }
 
@@ -112,7 +114,17 @@ export class NetworkClient {
   }
 
   sendMove(state) {
-    if (this.connected) this.socket.volatile.emit(EV.MOVE, state);
+    // volatile(버려도 되는 패킷) 대신 일반 전송: 패킷 유실로 인한 끊김 방지 (크기가 작아 부담 없음)
+    if (this.connected) this.socket.emit(EV.MOVE, state);
+  }
+
+  sendAttack(type) {
+    if (this.connected) this.socket.emit(EV.ATTACK, type);
+  }
+
+  /** 관리자 명령 → { ok, message } */
+  admin(action, target, extra = {}) {
+    return this.request(EV.ADMIN_ACTION, { action, target, ...extra });
   }
 
   sendChat(text) {

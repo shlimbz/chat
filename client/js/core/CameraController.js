@@ -27,37 +27,48 @@ export class CameraController {
     this.target = new THREE.Vector3();
     this._smoothTarget = new THREE.Vector3();
     this._first = true;
-    this._dragging = false;
-    this._last = { x: 0, y: 0 };
+    this._pointers = new Map(); // pointerId → {x, y}  (터치 두 손가락 = 확대/축소)
+    this._pinchDist = 0;
 
     this._onDown = (e) => {
       if (!this.enabled) return;
-      this._dragging = true;
-      this._last.x = e.clientX;
-      this._last.y = e.clientY;
+      this._pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
       dom.setPointerCapture?.(e.pointerId);
       dom.classList.add('dragging');
+      if (this._pointers.size === 2) this._pinchDist = this._pinchDistance();
     };
     this._onMove = (e) => {
-      if (!this._dragging || !this.enabled) return;
-      const dx = e.clientX - this._last.x;
-      const dy = e.clientY - this._last.y;
-      this._last.x = e.clientX;
-      this._last.y = e.clientY;
-      this.yaw -= dx * this.sensitivity;
-      this.pitch += dy * this.sensitivity * (this.invertY ? -1 : 1);
+      const prev = this._pointers.get(e.pointerId);
+      if (!prev || !this.enabled) return;
+      const dx = e.clientX - prev.x;
+      const dy = e.clientY - prev.y;
+      prev.x = e.clientX;
+      prev.y = e.clientY;
+      if (this._pointers.size >= 2) {
+        // 핀치 줌
+        const d = this._pinchDistance();
+        if (this._pinchDist > 0 && d > 0) {
+          this.targetDistance = clampDist(this.targetDistance * (this._pinchDist / d));
+        }
+        this._pinchDist = d;
+        return;
+      }
+      const touchBoost = e.pointerType === 'touch' ? 1.5 : 1;
+      this.yaw -= dx * this.sensitivity * touchBoost;
+      this.pitch += dy * this.sensitivity * touchBoost * (this.invertY ? -1 : 1);
       this.pitch = Math.min(1.25, Math.max(-0.25, this.pitch));
     };
     this._onUp = (e) => {
-      this._dragging = false;
+      this._pointers.delete(e.pointerId);
+      this._pinchDist = this._pointers.size === 2 ? this._pinchDistance() : 0;
       dom.releasePointerCapture?.(e.pointerId);
-      dom.classList.remove('dragging');
+      if (this._pointers.size === 0) dom.classList.remove('dragging');
     };
     this._onWheel = (e) => {
       if (!this.enabled) return;
       e.preventDefault();
       const factor = Math.exp(e.deltaY * 0.0012);
-      this.targetDistance = Math.min(CONFIG.CAMERA_MAX_DISTANCE, Math.max(CONFIG.CAMERA_MIN_DISTANCE, this.targetDistance * factor));
+      this.targetDistance = clampDist(this.targetDistance * factor);
     };
     this._onContext = (e) => e.preventDefault();
 
@@ -67,6 +78,11 @@ export class CameraController {
     dom.addEventListener('pointercancel', this._onUp);
     dom.addEventListener('wheel', this._onWheel, { passive: false });
     dom.addEventListener('contextmenu', this._onContext);
+  }
+
+  _pinchDistance() {
+    const [a, b] = [...this._pointers.values()];
+    return a && b ? Math.hypot(a.x - b.x, a.y - b.y) : 0;
   }
 
   /** 카메라가 바라보는 수평 전방 벡터 (이동 방향 계산용) */
@@ -125,3 +141,5 @@ export class CameraController {
     dom.removeEventListener('contextmenu', this._onContext);
   }
 }
+
+const clampDist = (d) => Math.min(CONFIG.CAMERA_MAX_DISTANCE, Math.max(CONFIG.CAMERA_MIN_DISTANCE, d));
