@@ -2,7 +2,7 @@
 
 웹 브라우저에서 바로 실행되는 로우폴리 3D 온라인 멀티플레이 헬스장 게임입니다.
 
-> **현재 단계: Phase 3 완료 (기본 3D 헬스장 + 멀티플레이 + 채팅 + 점프)**
+> **현재 단계: Phase 3 완료 (기본 3D 헬스장 + 멀티플레이 + 채팅 + 점프) · DB: 로컬 SQLite 또는 Turso**
 > 운동 미니게임(Phase 4)과 성장 시스템(Phase 5)은 아직 **없습니다**. 미니게임은 기획 확정 후 진행합니다.
 
 ---
@@ -118,7 +118,7 @@ localhost 로 접속하면 자동으로 `http://localhost:3000` 서버에 연결
 ```bash
 npm test
 ```
-클라이언트 로직 8개 + 서버 로직 6개 테스트가 실행됩니다 (서버 패키지 설치 없이도 실행 가능).
+클라이언트 로직 8개 + 서버 로직 11개 테스트가 실행됩니다 (서버 패키지 설치 없이도 실행 가능). DB 테스트는 로컬 SQLite 와 Turso 방식 두 가지로 모두 실행됩니다.
 - 서버 테스트 내용: 가입/토큰 재접속/닉네임 사칭 차단, 외형 검증, 채팅 명령어 해석, 채팅 저장·페이지 조회, 귓속말이 관련자에게만 조회되는지, 도배 방지, 이동 검증(순간이동·높이 제한)
 
 ### 수동 테스트 체크리스트 (서버 + 브라우저 2개)
@@ -164,12 +164,13 @@ online-gym/
 │  │  ├─ index.js              # 실행 진입점
 │  │  ├─ app.js                # Express + Socket.IO 생성, /health
 │  │  ├─ config.js             # PORT, DB_PATH, CLIENT_ORIGIN, MAX_PLAYERS
-│  │  ├─ db.js                 # SQLite (node:sqlite) + 스키마 마이그레이션
+│  │  ├─ db.js                 # DB 연결 (로컬 SQLite 또는 Turso) + 스키마 관리
 │  │  ├─ services/UserService.js   # 계정·토큰(해시 저장)·외형·마지막 위치
 │  │  ├─ services/ChatService.js   # 채팅 저장/조회, 명령어 해석, 도배 방지
 │  │  ├─ game/PlayerRegistry.js    # 접속자 관리, 이동 검증, 변경분 스냅샷
 │  │  └─ socket/handlers.js        # 접속 인증, 동기화, 채팅 이벤트
-│  └─ test/services.test.js
+│  ├─ test/services.test.js  # 로컬/Turso 두 방식 모두 테스트
+│  └─ test-utils/fakeLibsql.js # 테스트용 가짜 Turso 클라이언트
 ├─ tools/serve.js              # 개발용 정적 서버
 ├─ tests/phase1.test.js
 └─ package.json
@@ -191,57 +192,66 @@ online-gym/
 
 ---
 
-## 배포 (GitHub Pages + 게임 서버)
+## 배포 (무료: GitHub Pages + Render + Turso)
 
-GitHub Pages 는 정적 파일만 제공하므로 **게임 서버는 별도 호스팅**이 필요합니다.
+| 역할 | 서비스 | 비용 |
+|---|---|---|
+| 게임 화면 | GitHub Pages | 무료 |
+| 게임 서버 (Socket.IO) | Render 무료 Web Service | 무료 (15분간 접속 없으면 잠듦, 깨어나는 데 약 1분) |
+| 데이터베이스 | Turso 무료 플랜 | 무료 (서버가 재시작돼도 계정·채팅 기록 유지) |
 
-### 1) 게임 서버 배포
+Socket.IO, Express, Turso 연결 부품은 Render 가 `npm install` 단계에서 자동으로 설치합니다. 따로 가입·설치할 필요가 없습니다.
 
-어느 서비스든 설정은 같습니다:
+### 1단계: GitHub 에 올리기
+저장소에 압축을 푼 `online-gym` 폴더 **안의 내용물 전체**를 업로드(덮어쓰기)합니다.
+`server/node_modules`, `server/data`, `.env` 파일은 올리지 마세요.
 
-| 항목 | 값 |
-|---|---|
-| 저장소 | GitHub 의 `online-gym` |
-| Root Directory | **비워두기** (서버가 `client/js/shared` 의 검증 코드를 함께 사용하므로 저장소 전체가 필요) |
-| Build Command | `npm install --prefix server` |
-| Start Command | `npm start --prefix server` |
-| 환경 변수 `CLIENT_ORIGIN` | GitHub Pages 주소, 예: `https://내아이디.github.io` |
-| 환경 변수 `DB_PATH` | 영구 디스크 경로 (아래 참고) |
+### 2단계: Turso 데이터베이스 만들기
+1. https://turso.tech 접속 → **Sign up** (GitHub 계정으로 가입)
+2. 대시보드에서 **Create Database** (이름: `online-gym`, 위치는 가능하면 Tokyo/Singapore 등 아시아 지역)
+3. 만든 DB 화면에서 **URL** 복사 → `libsql://online-gym-내아이디.turso.io` 형태 → 메모장에 저장
+4. 같은 화면에서 **Create Token**(또는 Generate Token) → 권한은 **Read & Write**, 만료는 **Never** → 나온 긴 문자열 복사 → 메모장에 저장
+   - 토큰은 다시 볼 수 없으니 꼭 저장하세요. 비밀번호와 같으니 다른 사람에게 보여주거나 GitHub 에 올리지 마세요.
 
-Node 버전은 `package.json` 의 `engines` (22.13 이상) 를 보고 자동 선택됩니다.
+### 3단계: Render 에 게임 서버 올리기
+1. https://render.com → GitHub 로 가입/로그인
+2. **New + → Web Service** → `online-gym` 저장소 **Connect**
+3. 설정
+   | 항목 | 값 |
+   |---|---|
+   | Name | `online-gym-server` |
+   | Region | `Singapore` |
+   | Branch | `main` |
+   | Root Directory | **비워두기** |
+   | Runtime | `Node` |
+   | Build Command | `npm install --prefix server` |
+   | Start Command | `npm start --prefix server` |
+   | Instance Type | **Free** |
+4. **Environment Variables** 에 4개 추가
+   | Key | Value |
+   |---|---|
+   | `NODE_VERSION` | `24` |
+   | `CLIENT_ORIGIN` | `https://내아이디.github.io` (끝에 `/` 없이) |
+   | `TURSO_DATABASE_URL` | 2단계에서 복사한 `libsql://...` 주소 |
+   | `TURSO_AUTH_TOKEN` | 2단계에서 복사한 토큰 |
+5. **Deploy Web Service** → 로그에 `ONLINE GYM 게임 서버 실행 중` 과 `DB : Turso (...)` 가 보이면 성공
+6. 화면 왼쪽 위의 `https://online-gym-server-xxxx.onrender.com` 주소 복사 → 뒤에 `/health` 를 붙여 열었을 때 `"db":"turso"` 가 보이면 정상
 
-#### A. Render — 빠른 테스트용 (무료, 데이터 유지 안 됨)
-1. https://render.com 가입(GitHub 로그인) → **New → Web Service** → `online-gym` 저장소 선택
-2. 위 표대로 Build/Start Command 입력, Instance Type **Free** → **Create Web Service**
-3. **Environment** 에 `CLIENT_ORIGIN` 추가
-4. 배포가 끝나면 `https://online-gym-xxxx.onrender.com` 형태의 주소가 생깁니다. `주소/health` 로 확인
-
-⚠️ 무료 플랜은 **15분간 접속이 없으면 잠들고, 다시 깨어날 때 약 1분** 걸립니다. 또한 **재시작·잠들기·재배포 때마다 SQLite 파일이 지워져** 계정·채팅 기록이 사라집니다. 무료로는 영구 디스크를 붙일 수 없으므로 기능 테스트용으로만 쓰세요.
-
-#### B. Railway — 데이터 유지 (볼륨 지원)
-1. https://railway.com 가입 → **New Project → Deploy from GitHub repo** → `online-gym`
-2. 서비스 **Settings**: Build Command `npm install --prefix server`, Start Command `npm start --prefix server`
-3. 서비스에서 **Volume** 추가 → Mount Path `/data`
-4. **Variables**: `DB_PATH=/data/online-gym.sqlite`, `CLIENT_ORIGIN=https://내아이디.github.io`
-5. **Settings → Networking → Generate Domain** 으로 공개 주소 생성 → `주소/health` 확인
-
-Railway 의 무료 플랜은 30일 체험 크레딧 이후 사용량이 제한적이므로, 계속 운영하려면 Hobby 플랜(월 5달러 수준)을 고려하세요. 요금은 바뀔 수 있으니 가입 시 공식 요금표를 확인하세요.
-
-### 2) 프론트엔드에 서버 주소 연결
-`client/js/config.js` 맨 위의 한 줄을 서버 주소로 바꿉니다 (GitHub 웹에서 연필 아이콘으로 바로 수정 가능):
+### 4단계: 게임 화면에 서버 주소 연결
+GitHub 저장소에서 `client/js/config.js` → 연필(✏️) 아이콘 → 맨 위 줄 수정 → **Commit changes**
 ```js
-const DEPLOYED_SERVER_URL = 'https://online-gym-xxxx.onrender.com';
-```
-수정 없이 테스트만 해보려면 게임 주소 뒤에 붙이면 됩니다 (브라우저에 기억됨):
-```
-https://내아이디.github.io/online-gym/?server=https://online-gym-xxxx.onrender.com
+const DEPLOYED_SERVER_URL = 'https://online-gym-server-xxxx.onrender.com';
 ```
 
-### 3) GitHub 에 올리기 / GitHub Pages 켜기
-1. 저장소에 압축을 푼 `online-gym` 폴더 **안의 내용물 전체**를 업로드(덮어쓰기)
-   - `server/node_modules`, `server/data` 는 올리지 마세요 (`.gitignore` 에 포함)
-2. **Settings → Pages** → Source `Deploy from a branch`, Branch `main` / `(root)` → Save
-3. 1~3분 뒤 `https://내아이디.github.io/online-gym/` 접속 → 우상단 초록 점 `접속자 1 / 20명` 이면 서버 연결 성공
+### 5단계: GitHub Pages 켜기 & 접속
+1. 저장소 **Settings → Pages** → Source `Deploy from a branch`, Branch `main` / `(root)` → Save (이미 했다면 생략)
+2. 1~3분 뒤 `https://내아이디.github.io/online-gym/` 접속 → `Ctrl+Shift+R`
+3. 우상단 초록 점 `접속자 1 / 20명` 이면 성공. 시크릿 창으로 다른 닉네임 접속 → 서로 보임
+
+> 💡 서버가 잠들어 있으면 첫 접속이 "서버 접속 실패" 로 나올 수 있습니다. 1분 정도 기다렸다가 "다시 시도" 를 누르거나, 미리 `서버주소/health` 를 열어 깨워 두세요.
+
+### (선택) Railway 로 서버 옮기기
+잠들지 않는 서버가 필요하면 Railway(유료, 월 5달러 수준)를 쓸 수 있습니다. Build/Start Command 와 환경 변수는 Render 와 동일하고, Turso 를 그대로 쓰면 볼륨 설정도 필요 없습니다.
 
 ---
 
@@ -251,14 +261,31 @@ https://내아이디.github.io/online-gym/?server=https://online-gym-xxxx.onrend
 |---|---|
 | "서버 접속 실패" | 서버 주소 확인(`주소/health` 가 열리는지). Render 무료는 첫 접속에 1분 정도 걸리므로 잠시 후 "다시 시도" |
 | 서버 로그에 CORS 오류 / 연결 거부 | 서버 환경 변수 `CLIENT_ORIGIN` 이 GitHub Pages 주소(`https://내아이디.github.io`, 끝에 `/` 없이)와 같은지 확인 |
-| `npm run server` 에서 `node:sqlite` 오류 | Node.js 가 22.13 미만입니다. LTS 최신 버전으로 업데이트 |
+| `npm run server` 에서 `node:sqlite` 오류 | Node.js 가 22.13 미만입니다. LTS 최신 버전으로 업데이트 (Render 는 `NODE_VERSION=24` 설정) |
+| Render 로그에 `[Turso] ... 401` / `Unauthorized` | `TURSO_AUTH_TOKEN` 이 틀렸거나 앞뒤에 공백이 있습니다. 토큰을 새로 만들어 다시 입력 |
+| Render 로그에 `[Turso] ... fetch failed` / `404` | `TURSO_DATABASE_URL` 주소 오타. Turso 대시보드에서 다시 복사 |
 | 닉네임이 이미 사용 중이라고 나옴 | 다른 사람이 쓰는 닉네임이거나, 예전에 다른 브라우저에서 만든 캐릭터입니다. 그 브라우저에서 접속하거나 새 닉네임 사용 |
 | 다른 탭에서 "연결이 종료" | 같은 캐릭터로 다른 창에서 접속하면 이전 창은 종료됩니다 (정상 동작) |
-| 계정·채팅이 사라짐 | Render 무료처럼 영구 디스크가 없는 호스팅입니다. Railway 볼륨 등 사용 |
+| 계정·채팅이 사라짐 | Turso 환경 변수가 설정되지 않아 서버 내부 파일에 저장 중입니다. `주소/health` 의 `db` 값이 `turso` 인지 확인 |
 | 화면이 하얗거나 "불러오는 중"에서 멈춤 | `index.html` 을 직접 열었거나 CDN(jsdelivr) 접근이 막힌 경우. `npm start` 후 접속 |
 | 프레임이 낮음 | ESC → 설정 → 그래픽 품질 "낮음", "FPS 표시"로 확인 |
 
 ---
+
+## 변경 파일 목록 (Turso 지원)
+
+```
+변경  server/src/db.js                      (로컬 SQLite / Turso 두 방식, 비동기)
+변경  server/src/services/UserService.js    (비동기)
+변경  server/src/services/ChatService.js    (비동기, 저장 시 DB 왕복 1회)
+변경  server/src/socket/handlers.js         (비동기 처리, 오류 시 안내)
+변경  server/src/app.js, index.js, config.js (Turso 환경 변수)
+변경  server/package.json                   (@libsql/client 추가)
+변경  server/.env.example, server/test/services.test.js
+신규  server/test-utils/fakeLibsql.js
+변경  README.md
+```
+게임 화면(client/) 파일은 바뀌지 않았습니다.
 
 ## 변경 파일 목록 (Phase 2 + 3 + 점프)
 

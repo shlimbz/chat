@@ -13,6 +13,9 @@ export function loadConfig(env = process.env) {
   return {
     PORT: Number(env.PORT) || 3000,
     DB_PATH: env.DB_PATH || path.resolve(__dirname, '..', 'data', 'online-gym.sqlite'),
+    // Turso 를 쓰려면 아래 두 값을 설정 (설정하면 DB_PATH 는 무시됨)
+    TURSO_DATABASE_URL: (env.TURSO_DATABASE_URL || '').trim(),
+    TURSO_AUTH_TOKEN: (env.TURSO_AUTH_TOKEN || '').trim(),
     CLIENT_ORIGIN: parseOrigins(env.CLIENT_ORIGIN),
     MAX_PLAYERS: Math.max(1, Number(env.MAX_PLAYERS) || 20),
     // 채팅 도배 방지: WINDOW_MS 동안 최대 MAX 개

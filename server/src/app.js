@@ -7,8 +7,8 @@ import { UserService } from './services/UserService.js';
 import { ChatService } from './services/ChatService.js';
 import { attachGameHandlers } from './socket/handlers.js';
 
-export function createGameServer(config, { log = console.log } = {}) {
-  const db = openDatabase(config.DB_PATH);
+export async function createGameServer(config, { log = console.log, libsqlClient } = {}) {
+  const db = await openDatabase(config, { libsqlClient });
   const users = new UserService(db);
   const chat = new ChatService(db);
 
@@ -45,12 +45,13 @@ export function createGameServer(config, { log = console.log } = {}) {
     io,
     httpServer,
     db,
+    dbDescription: db.describe(),
     game,
     listen(port = config.PORT) {
       return new Promise((resolve) => httpServer.listen(port, () => resolve(httpServer.address().port)));
     },
     async close() {
-      game.stop();
+      await game.stop();
       await new Promise((resolve) => io.close(() => resolve()));
       db.close();
     },

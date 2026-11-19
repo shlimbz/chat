@@ -54,38 +54,26 @@ export const HELP_TEXT = [
   '채팅창의 닉네임을 클릭하면 귓속말을 시작합니다.',
 ];
 
+const SELECT = `SELECT m.id, m.type, m.message, m.created_at, m.sender_id, m.receiver_id,
+                        s.nickname AS sender, r.nickname AS receiver
+                 FROM chat_messages m
+                 JOIN users s ON s.id = m.sender_id
+                 LEFT JOIN users r ON r.id = m.receiver_id`;
+
 export class ChatService {
+  /** @param {Awaited<ReturnType<import('../db.js').openDatabase>>} db */
   constructor(db) {
     this.db = db;
-    const select = `SELECT m.id, m.type, m.message, m.created_at, m.sender_id, m.receiver_id,
-                           s.nickname AS sender, r.nickname AS receiver
-                    FROM chat_messages m
-                    JOIN users s ON s.id = m.sender_id
-                    LEFT JOIN users r ON r.id = m.receiver_id`;
-    this.q = {
-      insert: db.prepare('INSERT INTO chat_messages (type, sender_id, receiver_id, message, created_at) VALUES (?, ?, ?, ?, ?)'),
-      byId: db.prepare(`${select} WHERE m.id = ?`),
-      globalBefore: db.prepare(`${select} WHERE m.type = 'global' AND m.id < ? ORDER BY m.id DESC LIMIT ?`),
-      whispersOf: db.prepare(`${select} WHERE m.type = 'whisper' AND (m.sender_id = ? OR m.receiver_id = ?) AND m.id < ? ORDER BY m.id DESC LIMIT ?`),
-      whispersBetween: db.prepare(`${select} WHERE m.type = 'whisper'
-        AND ((m.sender_id = ? AND m.receiver_id = ?) OR (m.sender_id = ? AND m.receiver_id = ?))
-        AND m.id < ? ORDER BY m.id DESC LIMIT ?`),
-      partners: db.prepare(`SELECT u.nickname AS nickname, MAX(m.id) AS lastId
-        FROM chat_messages m
-        JOIN users u ON u.id = CASE WHEN m.sender_id = ? THEN m.receiver_id ELSE m.sender_id END
-        WHERE m.type = 'whisper' AND (m.sender_id = ? OR m.receiver_id = ?)
-        GROUP BY u.id ORDER BY lastId DESC LIMIT 50`),
-    };
   }
 
   static toDto(row) {
     return {
-      id: row.id,
+      id: Number(row.id),
       type: row.type,
       from: row.sender,
       to: row.receiver || null,
       text: row.message,
-      time: row.created_at,
+      time: Number(row.created_at),
     };
   }
 
@@ -93,40 +81,73 @@ export class ChatService {
     return { id: null, type: CHAT_TYPES.SYSTEM, from: null, to: null, text, time: Date.now() };
   }
 
-  saveGlobal(senderId, text) {
-    const res = this.q.insert.run(CHAT_TYPES.GLOBAL, senderId, null, text, Date.now());
-    return ChatService.toDto(this.q.byId.get(res.lastInsertRowid));
+  /**
+   * 메시지 저장 (DB 왕복 1회: INSERT ... RETURNING)
+   * @param {{id:number,nickname:string}} sender
+   * @param {{id:number,nickname:string}|null} receiver
+   */
+  async _save(type, sender, receiver, text) {
+    const now = Date.now();
+    const row = await this.db.get(
+      'INSERT INTO chat_messages (type, sender_id, receiver_id, message, created_at) VALUES (?, ?, ?, ?, ?) RETURNING id',
+      [type, sender.id, receiver ? receiver.id : null, text, now],
+    );
+    return { id: Number(row.id), type, from: sender.nickname, to: receiver ? receiver.nickname : null, text, time: now };
   }
 
-  saveWhisper(senderId, receiverId, text) {
-    const res = this.q.insert.run(CHAT_TYPES.WHISPER, senderId, receiverId, text, Date.now());
-    return ChatService.toDto(this.q.byId.get(res.lastInsertRowid));
+  saveGlobal(sender, text) {
+    return this._save(CHAT_TYPES.GLOBAL, sender, null, text);
   }
 
-  globalHistory(beforeId = Number.MAX_SAFE_INTEGER, limit = CHAT_PAGE_SIZE) {
-    return this.q.globalBefore.all(toId(beforeId), clampLimit(limit)).reverse().map(ChatService.toDto);
+  saveWhisper(sender, receiver, text) {
+    return this._save(CHAT_TYPES.WHISPER, sender, receiver, text);
+  }
+
+  async globalHistory(beforeId, limit = CHAT_PAGE_SIZE) {
+    const rows = await this.db.all(
+      `${SELECT} WHERE m.type = 'global' AND m.id < ? ORDER BY m.id DESC LIMIT ?`,
+      [toId(beforeId), clampLimit(limit)],
+    );
+    return rows.reverse().map(ChatService.toDto);
   }
 
   /** 접속 직후 보여줄 기록: 최근 전체 채팅 + 본인 관련 최근 귓속말 (id 순 정렬) */
-  initialHistory(userId, limit = CHAT_PAGE_SIZE) {
-    const global = this.globalHistory(Number.MAX_SAFE_INTEGER, limit);
-    const whispers = this.q.whispersOf.all(userId, userId, Number.MAX_SAFE_INTEGER, 30).map(ChatService.toDto);
-    return [...global, ...whispers].sort((a, b) => a.id - b.id);
+  async initialHistory(userId, limit = CHAT_PAGE_SIZE) {
+    const [global, whisperRows] = await Promise.all([
+      this.globalHistory(undefined, limit),
+      this.db.all(
+        `${SELECT} WHERE m.type = 'whisper' AND (m.sender_id = ? OR m.receiver_id = ?) ORDER BY m.id DESC LIMIT 30`,
+        [userId, userId],
+      ),
+    ]);
+    return [...global, ...whisperRows.map(ChatService.toDto)].sort((a, b) => a.id - b.id);
   }
 
-  whisperPartners(userId) {
-    return this.q.partners.all(userId, userId, userId).map((r) => ({ nickname: r.nickname, lastId: r.lastId }));
+  async whisperPartners(userId) {
+    const rows = await this.db.all(
+      `SELECT u.nickname AS nickname, MAX(m.id) AS lastId
+       FROM chat_messages m
+       JOIN users u ON u.id = CASE WHEN m.sender_id = ? THEN m.receiver_id ELSE m.sender_id END
+       WHERE m.type = 'whisper' AND (m.sender_id = ? OR m.receiver_id = ?)
+       GROUP BY u.id ORDER BY lastId DESC LIMIT 50`,
+      [userId, userId, userId],
+    );
+    return rows.map((r) => ({ nickname: r.nickname, lastId: Number(r.lastId) }));
   }
 
-  whispersBetween(userId, otherId, beforeId = Number.MAX_SAFE_INTEGER, limit = CHAT_PAGE_SIZE) {
-    return this.q.whispersBetween
-      .all(userId, otherId, otherId, userId, toId(beforeId), clampLimit(limit))
-      .reverse()
-      .map(ChatService.toDto);
+  async whispersBetween(userId, otherId, beforeId, limit = CHAT_PAGE_SIZE) {
+    const rows = await this.db.all(
+      `${SELECT} WHERE m.type = 'whisper'
+         AND ((m.sender_id = ? AND m.receiver_id = ?) OR (m.sender_id = ? AND m.receiver_id = ?))
+         AND m.id < ? ORDER BY m.id DESC LIMIT ?`,
+      [userId, otherId, otherId, userId, toId(beforeId), clampLimit(limit)],
+    );
+    return rows.reverse().map(ChatService.toDto);
   }
 }
 
-const toId = (v) => (Number.isInteger(v) && v > 0 ? v : Number.MAX_SAFE_INTEGER);
+// 정수 범위 안의 큰 값 (SQLite 정수로 안전하게 전달)
+const toId = (v) => (Number.isInteger(v) && v > 0 ? v : 2147483647);
 const clampLimit = (v) => Math.min(CHAT_PAGE_SIZE, Math.max(1, Number(v) || CHAT_PAGE_SIZE));
 
 /** 사용자별 채팅 도배 방지 */

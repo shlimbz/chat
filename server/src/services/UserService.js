@@ -9,13 +9,13 @@ export const hashToken = (token) => crypto.createHash('sha256').update(String(to
 function rowToUser(row) {
   if (!row) return null;
   return {
-    id: row.id,
+    id: Number(row.id),
     nickname: row.nickname,
     appearance: sanitizeAppearance(safeJson(row.appearance)),
     bodyStats: sanitizeBodyStats(safeJson(row.body_stats)),
-    level: row.level,
-    exp: row.exp,
-    lastPos: row.last_x == null ? null : { x: row.last_x, z: row.last_z, r: row.last_r ?? 0 },
+    level: Number(row.level),
+    exp: Number(row.exp),
+    lastPos: row.last_x == null ? null : { x: Number(row.last_x), z: Number(row.last_z), r: Number(row.last_r ?? 0) },
   };
 }
 
@@ -24,43 +24,40 @@ function safeJson(s) {
 }
 
 export class UserService {
+  /** @param {Awaited<ReturnType<import('../db.js').openDatabase>>} db */
   constructor(db) {
     this.db = db;
-    this.q = {
-      byToken: db.prepare('SELECT * FROM users WHERE token_hash = ?'),
-      byNick: db.prepare('SELECT * FROM users WHERE nickname = ?'),
-      byId: db.prepare('SELECT * FROM users WHERE id = ?'),
-      insert: db.prepare('INSERT INTO users (nickname, token_hash, appearance, created_at, last_seen_at) VALUES (?, ?, ?, ?, ?)'),
-      setAppearance: db.prepare('UPDATE users SET appearance = ? WHERE id = ?'),
-      setLastSeen: db.prepare('UPDATE users SET last_seen_at = ?, last_x = ?, last_z = ?, last_r = ? WHERE id = ?'),
-    };
   }
 
-  findByToken(token) {
+  async findByToken(token) {
     if (typeof token !== 'string' || token.length < 16 || token.length > 128) return null;
-    return rowToUser(this.q.byToken.get(hashToken(token)));
+    return rowToUser(await this.db.get('SELECT * FROM users WHERE token_hash = ?', [hashToken(token)]));
   }
 
-  findByNickname(nickname) {
-    return rowToUser(this.q.byNick.get(String(nickname)));
+  async findByNickname(nickname) {
+    if (typeof nickname !== 'string' || nickname.length > 40) return null;
+    return rowToUser(await this.db.get('SELECT * FROM users WHERE nickname = ?', [nickname]));
   }
 
-  findById(id) {
-    return rowToUser(this.q.byId.get(Number(id)));
+  async findById(id) {
+    return rowToUser(await this.db.get('SELECT * FROM users WHERE id = ?', [Number(id)]));
   }
 
   /**
-   * @returns {{ok:true,user:object,token:string}|{ok:false,error:'NICK_INVALID'|'NICK_TAKEN'}}
+   * @returns {Promise<{ok:true,user:object,token:string}|{ok:false,error:'NICK_INVALID'|'NICK_TAKEN'}>}
    */
-  register(nickname, appearance) {
+  async register(nickname, appearance) {
     const nick = validateNickname(nickname);
     if (!nick.ok) return { ok: false, error: 'NICK_INVALID' };
-    if (this.q.byNick.get(nick.value)) return { ok: false, error: 'NICK_TAKEN' };
+    if (await this.db.get('SELECT id FROM users WHERE nickname = ?', [nick.value])) return { ok: false, error: 'NICK_TAKEN' };
     const token = crypto.randomBytes(24).toString('base64url');
     const now = Date.now();
     try {
-      const res = this.q.insert.run(nick.value, hashToken(token), JSON.stringify(sanitizeAppearance(appearance)), now, now);
-      return { ok: true, user: this.findById(res.lastInsertRowid), token };
+      const res = await this.db.run(
+        'INSERT INTO users (nickname, token_hash, appearance, created_at, last_seen_at) VALUES (?, ?, ?, ?, ?)',
+        [nick.value, hashToken(token), JSON.stringify(sanitizeAppearance(appearance)), now, now],
+      );
+      return { ok: true, user: await this.findById(res.lastInsertRowid), token };
     } catch (err) {
       // 동시에 같은 닉네임으로 가입하는 경우 (UNIQUE 제약)
       if (String(err.message).includes('UNIQUE')) return { ok: false, error: 'NICK_TAKEN' };
@@ -68,13 +65,16 @@ export class UserService {
     }
   }
 
-  updateAppearance(userId, appearance) {
+  async updateAppearance(userId, appearance) {
     const clean = sanitizeAppearance(appearance);
-    this.q.setAppearance.run(JSON.stringify(clean), userId);
+    await this.db.run('UPDATE users SET appearance = ? WHERE id = ?', [JSON.stringify(clean), userId]);
     return clean;
   }
 
-  saveLastSeen(userId, pos) {
-    this.q.setLastSeen.run(Date.now(), pos?.x ?? null, pos?.z ?? null, pos?.r ?? null, userId);
+  async saveLastSeen(userId, pos) {
+    await this.db.run(
+      'UPDATE users SET last_seen_at = ?, last_x = ?, last_z = ?, last_r = ? WHERE id = ?',
+      [Date.now(), pos?.x ?? null, pos?.z ?? null, pos?.r ?? null, userId],
+    );
   }
 }

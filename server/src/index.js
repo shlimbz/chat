@@ -4,13 +4,13 @@ import { loadConfig } from './config.js';
 import { createGameServer } from './app.js';
 
 const config = loadConfig();
-const server = createGameServer(config);
+const server = await createGameServer(config);
 const port = await server.listen(config.PORT);
 
 console.log('');
 console.log('  ONLINE GYM 게임 서버 실행 중');
 console.log(`  ▶ 주소: http://localhost:${port}   (상태 확인: /health)`);
-console.log(`  ▶ DB  : ${config.DB_PATH}`);
+console.log(`  ▶ DB  : ${server.dbDescription}`);
 console.log(`  ▶ 허용 주소(CLIENT_ORIGIN): ${Array.isArray(config.CLIENT_ORIGIN) ? config.CLIENT_ORIGIN.join(', ') : '*'}`);
 console.log(`  ▶ 최대 인원: ${config.MAX_PLAYERS}명`);
 console.log('');

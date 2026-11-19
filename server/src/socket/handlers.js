@@ -24,21 +24,22 @@ export function attachGameHandlers(io, { config, users, chat, log = console.log 
   const broadcastSystem = (text) => io.emit(EV.CHAT, ChatService.system(text));
 
   // ── 접속 인증 (연결이 성립되기 전에 실행) ───────────────
-  io.use((socket, next) => {
+  io.use(async (socket, next) => {
     try {
       const auth = socket.handshake.auth || {};
       if (auth.v !== PROTOCOL_VERSION) return next(authError(AUTH_ERRORS.BAD_VERSION));
 
-      let user = auth.token ? users.findByToken(auth.token) : null;
+      let user = auth.token ? await users.findByToken(auth.token) : null;
       let newToken = null;
       if (!user) {
         // 토큰이 없거나 틀림 → 새 계정 등록. 기존 닉네임이면 거절 (사칭 방지)
-        const res = users.register(auth.nickname, auth.appearance);
+        if (registry.count >= config.MAX_PLAYERS) return next(authError(AUTH_ERRORS.SERVER_FULL));
+        const res = await users.register(auth.nickname, auth.appearance);
         if (!res.ok) return next(authError(AUTH_ERRORS[res.error]));
         user = res.user;
         newToken = res.token;
       } else if (auth.appearance) {
-        user.appearance = users.updateAppearance(user.id, auth.appearance);
+        user.appearance = await users.updateAppearance(user.id, auth.appearance);
       }
 
       const reconnecting = registry.getByUserId(user.id);
@@ -46,6 +47,13 @@ export function attachGameHandlers(io, { config, users, chat, log = console.log 
 
       socket.data.user = user;
       socket.data.newToken = newToken;
+      // 채팅 기록은 연결 전에 미리 조회 (connection 처리를 동기적으로 유지하기 위해)
+      try {
+        socket.data.history = await chat.initialHistory(user.id);
+      } catch (err) {
+        log('[chat] 기록 조회 실패', err);
+        socket.data.history = [];
+      }
       return next();
     } catch (err) {
       log('[auth] error', err);
@@ -79,7 +87,7 @@ export function attachGameHandlers(io, { config, users, chat, log = console.log 
         x: player.x, z: player.z, r: player.r,
       },
       players: registry.list().filter((p) => p !== player).map(PlayerRegistry.info),
-      chat: chat.initialHistory(user.id),
+      chat: socket.data.history,
       maxPlayers: config.MAX_PLAYERS,
       serverTime: Date.now(),
     });
@@ -98,12 +106,20 @@ export function attachGameHandlers(io, { config, users, chat, log = console.log 
     socket.on(EV.SET_APPEARANCE, (appearance) => {
       const p = registry.get(socket.id);
       if (!p) return;
-      p.appearance = users.updateAppearance(p.id, sanitizeAppearance(appearance));
+      p.appearance = sanitizeAppearance(appearance);
       socket.broadcast.emit(EV.PLAYER_APPEARANCE, { id: p.id, appearance: p.appearance });
+      users.updateAppearance(p.id, p.appearance).catch((err) => log('[db] 외형 저장 실패', err));
     });
 
     // ── 채팅 ─────────────────────────────────────────
     socket.on(EV.CHAT_SEND, (raw) => {
+      handleChat(raw).catch((err) => {
+        log('[chat] 오류', err);
+        sendSystem(socket, '메시지를 처리하지 못했습니다. 잠시 후 다시 시도하세요.');
+      });
+    });
+
+    const handleChat = async (raw) => {
       const p = registry.get(socket.id);
       if (!p) return;
       const cmd = parseChatInput(raw);
@@ -114,7 +130,7 @@ export function attachGameHandlers(io, { config, users, chat, log = console.log 
       }
       switch (cmd.kind) {
         case 'global': {
-          io.emit(EV.CHAT, chat.saveGlobal(p.id, cmd.text));
+          io.emit(EV.CHAT, await chat.saveGlobal(p, cmd.text));
           break;
         }
         case 'whisper':
@@ -124,7 +140,7 @@ export function attachGameHandlers(io, { config, users, chat, log = console.log 
           const target = registry.getByNickname(targetName);
           if (!target) { sendSystem(socket, `'${targetName}'님은 현재 접속 중이 아닙니다.`); break; }
           if (target.id === p.id) { sendSystem(socket, '자기 자신에게는 귓속말을 보낼 수 없습니다.'); break; }
-          const msg = chat.saveWhisper(p.id, target.id, cmd.text);
+          const msg = await chat.saveWhisper(p, target, cmd.text);
           // 귓속말은 보낸 사람과 받는 사람에게만 전송 (전체 브로드캐스트 금지)
           io.to(target.socketId).emit(EV.CHAT, msg);
           socket.emit(EV.CHAT, msg);
@@ -144,30 +160,25 @@ export function attachGameHandlers(io, { config, users, chat, log = console.log 
         default:
           sendSystem(socket, cmd.error || '알 수 없는 입력입니다.');
       }
-    });
+    };
 
-    socket.on(EV.CHAT_HISTORY, (req, ack) => {
+    // 응답(ack)이 필요한 조회 요청: 오류가 나도 빈 결과로 응답
+    const query = (event, fn) => socket.on(event, (req, ack) => {
       if (typeof ack !== 'function') return;
-      ack(chat.globalHistory(Number(req?.beforeId)));
+      fn(req).then(ack, (err) => { log(`[${event}] 오류`, err); ack([]); });
     });
-
-    socket.on(EV.CHAT_PARTNERS, (_req, ack) => {
-      if (typeof ack !== 'function') return;
-      ack(chat.whisperPartners(user.id));
-    });
-
-    socket.on(EV.CHAT_WHISPERS, (req, ack) => {
-      if (typeof ack !== 'function') return;
-      const other = users.findByNickname(req?.nickname);
-      if (!other) return ack([]);
-      ack(chat.whispersBetween(user.id, other.id, Number(req?.beforeId)));
+    query(EV.CHAT_HISTORY, (req) => chat.globalHistory(Number(req?.beforeId)));
+    query(EV.CHAT_PARTNERS, () => chat.whisperPartners(user.id));
+    query(EV.CHAT_WHISPERS, async (req) => {
+      const other = await users.findByNickname(req?.nickname);
+      return other ? chat.whispersBetween(user.id, other.id, Number(req?.beforeId)) : [];
     });
 
     // ── 퇴장 ─────────────────────────────────────────
     socket.on('disconnect', (reason) => {
       const p = registry.remove(socket.id);
       if (!p) return; // 중복 접속으로 교체된 경우
-      users.saveLastSeen(p.id, { x: p.x, z: p.z, r: p.r });
+      users.saveLastSeen(p.id, { x: p.x, z: p.z, r: p.r }).catch((err) => log('[db] 위치 저장 실패', err));
       limiter.forget(p.id);
       io.emit(EV.PLAYER_LEAVE, { id: p.id });
       broadcastSystem(`${p.nickname}님이 퇴장했습니다.`);
@@ -183,9 +194,9 @@ export function attachGameHandlers(io, { config, users, chat, log = console.log 
 
   return {
     registry,
-    stop() {
+    async stop() {
       clearInterval(tick);
-      for (const p of registry.list()) users.saveLastSeen(p.id, { x: p.x, z: p.z, r: p.r });
+      await Promise.allSettled(registry.list().map((p) => users.saveLastSeen(p.id, { x: p.x, z: p.z, r: p.r })));
     },
   };
 }
