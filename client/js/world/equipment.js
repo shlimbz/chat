@@ -9,7 +9,9 @@ const matCache = new Map();
 export function m(color, opts = {}) {
   const key = color + JSON.stringify(opts);
   if (!matCache.has(key)) {
-    matCache.set(key, new THREE.MeshStandardMaterial({ color, flatShading: true, roughness: 0.75, metalness: 0, ...opts }));
+    // 머티리얼은 정적 병합(StaticBatcher) 시 정점 색상으로 변환되므로 색상 정보 전달용입니다.
+    const { metalness, roughness, ...rest } = opts; // Lambert 에 없는 속성 제거
+    matCache.set(key, new THREE.MeshLambertMaterial({ color, flatShading: true, ...rest }));
   }
   return matCache.get(key);
 }
@@ -92,6 +94,7 @@ export function createBenchPress() {
   box(g, 1.18, 0.06, 0.06, PALETTE.frame, 0, 0.4, -0.68);
   const bar = barbell(g, 0, 1.15, -0.55, 1.9);
   bar.name = 'Barbell';
+  bar.userData.dynamic = true; // Phase 4 에서 움직일 부품 → 정적 병합 제외
   return {
     group: g,
     collider: { minX: -1.0, maxX: 1.0, minZ: -0.85, maxZ: 0.72 },
@@ -160,8 +163,8 @@ export function createLegPress() {
   const sled = box(g, 0.7, 0.55, 0.08, PALETTE.frameLight, 0, 1.0, -0.55);
   sled.rotation.x = 0.7;
   for (const s of [-1, 1]) {
-    cyl(g, 0.21, 0.06, PALETTE.plate, s * 0.45, 0.95, -0.75, 'x', 10);
-    cyl(g, 0.15, 0.065, PALETTE.plateRim, s * 0.45, 0.95, -0.75, 'x', 10);
+    cyl(g, 0.21, 0.06, PALETTE.plate, s * 0.45, 0.95, -0.75, 'x', 8);
+    cyl(g, 0.15, 0.065, PALETTE.plateRim, s * 0.45, 0.95, -0.75, 'x', 8);
   }
   return {
     group: g,
@@ -201,6 +204,7 @@ export function createLatPulldown() {
   cyl(g, 0.006, 0.6, '#222222', 0, 1.95, 0.4);
   const bar = box(g, 1.2, 0.04, 0.04, PALETTE.steel, 0, 1.65, 0.4);
   bar.name = 'PullBar';
+  bar.userData.dynamic = true;
   for (const s of [-1, 1]) cyl(g, 0.03, 0.18, PALETTE.rubber, s * 0.52, 1.65, 0.4, 'x', 6);
   box(g, 0.45, 0.1, 0.42, PALETTE.pad, 0, 0.5, 0.3);
   box(g, 0.1, 0.45, 0.1, PALETTE.frame, 0, 0.25, 0.3);

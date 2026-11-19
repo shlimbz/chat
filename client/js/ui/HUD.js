@@ -48,6 +48,9 @@ export class HUD {
     ]);
     this.root.append(this.helpEl);
 
+    this.fpsEl = el('div', { class: 'hud-fps hidden' });
+    this.root.append(this.fpsEl);
+
     this.toastEl = el('div', { class: 'hud-toast hidden' });
     this.root.append(this.toastEl);
 
@@ -82,6 +85,15 @@ export class HUD {
     if (s !== this._lastState) { this.stateEl.textContent = s; this._lastState = s; }
     const z = `위치: ${zone}`;
     if (z !== this._lastZone) { this.zoneEl.textContent = z; this._lastZone = z; }
+  }
+
+  setFpsVisible(v) {
+    this.fpsEl.classList.toggle('hidden', !v);
+  }
+
+  setFps(fps, drawCalls, triangles) {
+    if (this.fpsEl.classList.contains('hidden')) return;
+    this.fpsEl.textContent = `${Math.round(fps)} FPS · 드로우콜 ${drawCalls} · 삼각형 ${(triangles / 1000).toFixed(1)}k`;
   }
 
   toast(text, ms = 2600) {

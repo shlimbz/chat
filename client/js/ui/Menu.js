@@ -93,31 +93,47 @@ export class Menu {
     this.sensInput = el('input', { attrs: { type: 'range', min: '0.2', max: '3', step: '0.1' } });
     this.sensValue = el('span', { class: 'menu-value' });
     this.invertInput = el('input', { attrs: { type: 'checkbox' } });
-    this.shadowInput = el('input', { attrs: { type: 'checkbox' } });
     this.nameTagInput = el('input', { attrs: { type: 'checkbox' } });
+    this.fpsInput = el('input', { attrs: { type: 'checkbox' } });
+    this.quality = 'medium';
 
     const emit = () => {
       const s = {
         mouseSensitivity: Number(this.sensInput.value),
         invertY: this.invertInput.checked,
-        shadows: this.shadowInput.checked,
+        quality: this.quality,
         showNameTags: this.nameTagInput.checked,
+        showFps: this.fpsInput.checked,
       };
       this.sensValue.textContent = `${s.mouseSensitivity.toFixed(1)}x`;
       this.h.onSettingsChange?.(s);
     };
-    for (const input of [this.sensInput, this.invertInput, this.shadowInput, this.nameTagInput]) {
+    for (const input of [this.sensInput, this.invertInput, this.nameTagInput, this.fpsInput]) {
       input.addEventListener('input', emit);
+    }
+
+    // 그래픽 품질 선택 (낮음 / 보통 / 높음)
+    this.qualityBox = el('div', { class: 'menu-quality' });
+    for (const [id, label] of [['low', '낮음'], ['medium', '보통'], ['high', '높음']]) {
+      const b = el('button', { class: 'chip', attrs: { type: 'button', 'data-value': id }, text: label });
+      b.addEventListener('click', () => { this.quality = id; this._syncQuality(); emit(); });
+      this.qualityBox.append(b);
     }
 
     return el('div', { class: 'menu-view hidden' }, [
       el('h3', { text: '설정' }),
+      el('div', { class: 'menu-row' }, [el('span', { text: '그래픽 품질' }), this.qualityBox]),
+      el('div', { class: 'menu-hint', text: '높음: 실시간 그림자·거울 반사 (무거움)' }),
       el('label', { class: 'menu-row' }, [el('span', { text: '마우스 감도' }), this.sensInput, this.sensValue]),
       el('label', { class: 'menu-row' }, [el('span', { text: '카메라 상하 반전' }), this.invertInput]),
-      el('label', { class: 'menu-row' }, [el('span', { text: '그림자' }), this.shadowInput]),
       el('label', { class: 'menu-row' }, [el('span', { text: '닉네임 표시' }), this.nameTagInput]),
+      el('label', { class: 'menu-row' }, [el('span', { text: 'FPS 표시' }), this.fpsInput]),
       el('button', { class: 'menu-btn', attrs: { type: 'button' }, text: '← 돌아가기', on: { click: () => this._show('main') } }),
     ]);
+  }
+
+  _syncQuality() {
+    for (const b of this.qualityBox.children) b.classList.toggle('selected', b.dataset.value === this.quality);
   }
 
   _syncSettings() {
@@ -125,8 +141,10 @@ export class Menu {
     this.sensInput.value = String(s.mouseSensitivity);
     this.sensValue.textContent = `${s.mouseSensitivity.toFixed(1)}x`;
     this.invertInput.checked = s.invertY;
-    this.shadowInput.checked = s.shadows;
     this.nameTagInput.checked = s.showNameTags;
+    this.fpsInput.checked = s.showFps;
+    this.quality = s.quality;
+    this._syncQuality();
   }
 }
 

@@ -140,7 +140,7 @@ html, body {
 #hud { position: fixed; inset: 0; pointer-events: none; color: #fff; }
 .hud-box {
   position: absolute; background: var(--hud-bg); border-radius: 12px; padding: 8px 14px;
-  backdrop-filter: blur(4px); font-size: 14px;
+  font-size: 14px; /* backdrop-filter 는 3D 화면 위에서 매 프레임 비용이 커서 사용하지 않음 */
 }
 .hud-top-left { top: 14px; left: 14px; display: flex; align-items: center; gap: 10px; }
 .hud-level { background: var(--yellow); color: var(--ink); font-weight: 900; border-radius: 8px; padding: 2px 8px; font-size: 13px; }
@@ -171,6 +171,11 @@ kbd {
 .hud-help span { background: var(--hud-bg); border-radius: 8px; padding: 4px 10px; font-size: 13px; }
 .hud-help b { color: var(--yellow); }
 .hud-help.fade { opacity: 0; }
+.hud-fps {
+  position: absolute; top: 58px; right: 14px;
+  background: rgba(0,0,0,.55); color: #9cff9c; font: 12px/1.4 ui-monospace, Consolas, monospace;
+  padding: 3px 8px; border-radius: 6px;
+}
 .hud-toast {
   position: absolute; top: 20%; left: 50%; transform: translateX(-50%);
   background: rgba(28,31,38,.85); color: #fff; font-weight: 700;
@@ -199,6 +204,9 @@ kbd {
 .menu-row span:first-child { flex: 1; }
 .menu-row input[type=range] { width: 120px; }
 .menu-row input[type=checkbox] { width: 20px; height: 20px; }
+.menu-quality { display: flex; gap: 4px; }
+.menu-quality .chip { padding: 4px 10px; }
+.menu-hint { font-size: 11px; color: var(--ink-soft); margin-top: -4px; }
 .menu-value { width: 36px; text-align: right; font-size: 13px; color: var(--ink-soft); }
 .menu-info { display: flex; flex-direction: column; gap: 4px; margin-bottom: 8px; }
 .menu-info-row { display: flex; justify-content: space-between; gap: 10px; padding: 6px 0; border-bottom: 1px dashed #d6d1c6; font-size: 14px; }

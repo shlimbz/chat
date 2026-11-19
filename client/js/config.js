@@ -11,8 +11,7 @@ export const CONFIG = {
   SERVER_URL: override.SERVER_URL || 'http://localhost:3000',
 
   // 렌더링
-  MAX_PIXEL_RATIO: 1.5,
-  SHADOWS: true,
+  MAX_PIXEL_RATIO: 1.5, // "높음" 품질의 최대 해상도 배율
 
   // 이동
   WALK_SPEED: 3.2, // m/s
@@ -22,10 +21,10 @@ export const CONFIG = {
   PLAYER_RADIUS: 0.35,
 
   // 카메라
-  CAMERA_MIN_DISTANCE: 2.2,
+  CAMERA_MIN_DISTANCE: 2.0,
   CAMERA_MAX_DISTANCE: 10,
-  CAMERA_DEFAULT_DISTANCE: 5,
-  CAMERA_TARGET_HEIGHT: 1.35,
+  CAMERA_DEFAULT_DISTANCE: 4.6,
+  CAMERA_TARGET_HEIGHT: 1.05,
   MOUSE_SENSITIVITY: 0.0045,
 
   // 상호작용

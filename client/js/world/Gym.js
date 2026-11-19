@@ -1,7 +1,7 @@
 // 헬스장 3D 공간 구성: 바닥/벽/조명/거울/운동기구/소품 배치 + 충돌 영역 등록
 import * as THREE from 'three';
-import { Reflector } from 'three/addons/objects/Reflector.js';
 import { CollisionWorld } from './CollisionWorld.js';
+import { batchStatic } from './StaticBatcher.js';
 import {
   createBenchPress, createDumbbellRack, createTreadmill, createLegPress, createShoulderPress,
   createLatPulldown, createRestBench, createWaterCooler, createPlant, createVendingMachine,
@@ -39,7 +39,7 @@ const FACTORIES = {
 };
 
 export class Gym {
-  constructor(scene, { shadows = true } = {}) {
+  constructor(scene) {
     this.scene = scene;
     this.root = new THREE.Group();
     this.root.name = 'Gym';
@@ -51,15 +51,40 @@ export class Gym {
     /** @type {Array<{id:string,type:string,label:string,x:number,z:number,rotY:number,object:THREE.Object3D,parts:object}>} */
     this.interactables = [];
 
-    this._buildLights(shadows);
+    this._buildLights();
     this._buildRoom();
     this._buildMirror();
     this._buildEquipment();
     this._buildProps();
+
+    // 움직이지 않는 메시를 몇 개로 병합 (성능 핵심)
+    this.batchStats = batchStatic(this.root);
+    console.info(`[Gym] 정적 메시 병합: ${this.batchStats.before}개 → ${this.batchStats.after}개`);
   }
 
-  setShadows(enabled) {
-    this.sun.castShadow = enabled;
+  /**
+   * 그래픽 품질 적용
+   * @param {{shadows:boolean, mirror:boolean}} q
+   */
+  async setQuality({ shadows, mirror }) {
+    this.sun.castShadow = shadows;
+    if (mirror && !this.reflector) {
+      try {
+        // 실시간 거울은 "높음" 품질에서만 필요할 때 불러옴 (장면을 한 번 더 그리므로 무거움)
+        const { Reflector } = await import('three/addons/objects/Reflector.js');
+        const r = new Reflector(new THREE.PlaneGeometry(this.mirrorSize.w, this.mirrorSize.h), {
+          clipBias: 0.003, textureWidth: 512, textureHeight: 160, color: '#c8ccd2',
+        });
+        r.position.copy(this.fakeMirror.position);
+        r.position.z += 0.005;
+        this.root.add(r);
+        this.reflector = r;
+      } catch (err) {
+        console.warn('[Gym] 실시간 거울 생성 실패 — 기본 거울 사용', err);
+      }
+    }
+    if (this.reflector) this.reflector.visible = mirror;
+    this.fakeMirror.visible = !(mirror && this.reflector);
   }
 
   /** 플레이어 위치에서 가장 가까운 상호작용 가능한 기구 */
@@ -84,26 +109,23 @@ export class Gym {
     return obj;
   }
 
-  _buildLights(shadows) {
-    const hemi = new THREE.HemisphereLight('#ffffff', '#c9b8a0', 1.7);
+  _buildLights() {
+    // 조명 2개만 사용 (반구광 + 태양광). 그림자는 "높음" 품질에서만 켭니다.
+    const hemi = new THREE.HemisphereLight('#ffffff', '#c9b8a0', 1.9);
     this.scene.add(hemi);
 
-    const sun = new THREE.DirectionalLight('#fff4e0', 2.0);
+    const sun = new THREE.DirectionalLight('#fff4e0', 1.7);
     sun.position.set(9, 18, 7);
     sun.target.position.set(0, 0, 0);
-    sun.castShadow = shadows;
-    sun.shadow.mapSize.set(2048, 2048);
+    sun.castShadow = false;
+    sun.shadow.mapSize.set(1024, 1024);
     const sc = sun.shadow.camera;
     sc.left = -19; sc.right = 19; sc.top = 15; sc.bottom = -15; sc.near = 1; sc.far = 50;
-    sun.shadow.bias = -0.0005;
-    sun.shadow.normalBias = 0.02;
+    sun.shadow.bias = -0.0008;
+    sun.shadow.normalBias = 0.03;
     this.scene.add(sun);
     this.scene.add(sun.target);
     this.sun = sun;
-
-    const fill = new THREE.DirectionalLight('#dfe9ff', 0.6);
-    fill.position.set(-10, 8, -6);
-    this.scene.add(fill);
   }
 
   _buildRoom() {
@@ -224,26 +246,34 @@ export class Gym {
     const D = GYM_SIZE.depth / 2;
     const w = 8;
     const h = 2.4;
+    this.mirrorSize = { w, h };
     const frame = new THREE.Mesh(new THREE.BoxGeometry(w + 0.2, h + 0.2, 0.06), m('#c9ced6'));
     frame.position.set(0, 0.95 + h / 2, -D + 0.03);
     this.root.add(frame);
-    try {
-      const mirror = new Reflector(new THREE.PlaneGeometry(w, h), {
-        clipBias: 0.003,
-        textureWidth: 1024,
-        textureHeight: 320,
-        color: '#c8ccd2',
-      });
-      mirror.position.set(0, 0.95 + h / 2, -D + 0.07);
-      this.root.add(mirror);
-      this.mirror = mirror;
-    } catch (err) {
-      // Reflector 를 사용할 수 없는 환경이면 반짝이는 판으로 대체
-      console.warn('[Gym] Reflector 생성 실패, 일반 재질로 대체:', err);
-      const plate = new THREE.Mesh(new THREE.PlaneGeometry(w, h), m('#cfd8e3', { metalness: 0.6, roughness: 0.15 }));
-      plate.position.set(0, 0.95 + h / 2, -D + 0.07);
-      this.root.add(plate);
-    }
+
+    // 기본 거울: 반사 대신 은은한 그라데이션 텍스처 (렌더링 비용 거의 없음)
+    const c = document.createElement('canvas');
+    c.width = 256;
+    c.height = 64;
+    const ctx = c.getContext('2d');
+    const grad = ctx.createLinearGradient(0, 0, 256, 64);
+    grad.addColorStop(0, '#dfe9f3');
+    grad.addColorStop(0.45, '#f7fbff');
+    grad.addColorStop(0.55, '#e6eef7');
+    grad.addColorStop(1, '#cfdbe8');
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, 256, 64);
+    ctx.strokeStyle = 'rgba(255,255,255,0.8)';
+    ctx.lineWidth = 6;
+    for (const x of [60, 80, 170, 186]) { ctx.beginPath(); ctx.moveTo(x, 64); ctx.lineTo(x + 30, 0); ctx.stroke(); }
+    const tex = new THREE.CanvasTexture(c);
+    tex.colorSpace = THREE.SRGBColorSpace;
+    const fake = new THREE.Mesh(new THREE.PlaneGeometry(w, h), new THREE.MeshBasicMaterial({ map: tex }));
+    fake.position.set(0, 0.95 + h / 2, -D + 0.065);
+    fake.userData.noBatch = true;
+    this.root.add(fake);
+    this.fakeMirror = fake;
+    this.reflector = null;
   }
 
   _buildEquipment() {

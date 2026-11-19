@@ -153,14 +153,14 @@ export class CharacterCreator {
   // ── 3D 미리보기 ───────────────────────────────────────
   _buildPreview() {
     const renderer = new THREE.WebGLRenderer({ canvas: this.previewCanvas, antialias: true, alpha: true });
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
     this.renderer = renderer;
 
     const scene = new THREE.Scene();
     this.scene = scene;
     this.camera = new THREE.PerspectiveCamera(32, 1, 0.1, 50);
-    this.camera.position.set(0, 1.25, 4.6);
-    this.camera.lookAt(0, 0.95, 0);
+    this.camera.position.set(0, 1.0, 4.0);
+    this.camera.lookAt(0, 0.74, 0);
 
     scene.add(new THREE.HemisphereLight('#ffffff', '#b9a990', 2.0));
     const key = new THREE.DirectionalLight('#fff3e0', 2.2);
@@ -171,13 +171,13 @@ export class CharacterCreator {
     scene.add(rim);
 
     const base = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.85, 0.95, 0.12, 24),
-      new THREE.MeshStandardMaterial({ color: '#f6d55c', flatShading: true, roughness: 0.8 }),
+      new THREE.CylinderGeometry(0.75, 0.85, 0.12, 24),
+      new THREE.MeshLambertMaterial({ color: '#f6d55c', flatShading: true }),
     );
     base.position.y = -0.06;
     scene.add(base);
 
-    this.model = new CharacterModel(this.appearance, { castShadow: false });
+    this.model = new CharacterModel(this.appearance);
     this.model.root.rotation.y = 0.35;
     scene.add(this.model.root);
 

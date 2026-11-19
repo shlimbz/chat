@@ -12,7 +12,7 @@ import { CharacterModel } from '../character/CharacterModel.js';
 import { PlayerController } from '../character/PlayerController.js';
 import { HUD } from '../ui/HUD.js';
 import { Menu } from '../ui/Menu.js';
-import { saveProfile, saveSettings } from './storage.js';
+import { saveProfile, saveSettings, QUALITY_PRESETS } from './storage.js';
 import { EQUIPMENT_TYPES } from '../shared/equipmentTypes.js';
 
 export class Game {
@@ -30,9 +30,8 @@ export class Game {
 
     // 렌더러
     const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio, CONFIG.MAX_PIXEL_RATIO));
-    renderer.shadowMap.enabled = true;
-    renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    renderer.shadowMap.enabled = false;
+    renderer.shadowMap.type = THREE.PCFShadowMap; // Soft 보다 가벼움
     renderer.domElement.id = 'game-canvas';
     container.append(renderer.domElement);
     this.renderer = renderer;
@@ -42,7 +41,7 @@ export class Game {
     this.camera = new THREE.PerspectiveCamera(60, 1, 0.1, 120);
 
     // 월드
-    this.gym = new Gym(this.scene, { shadows: settings.shadows });
+    this.gym = new Gym(this.scene);
 
     // 입력 / 카메라
     this.input = new Input();
@@ -80,6 +79,7 @@ export class Game {
     this._onResize = () => this._resize();
     window.addEventListener('resize', this._onResize);
     this._resize();
+    this._fps = { frames: 0, time: 0 };
   }
 
   start() {
@@ -98,11 +98,23 @@ export class Game {
     saveSettings(this.settings);
     this.cameraCtl.sensitivity = CONFIG.MOUSE_SENSITIVITY * this.settings.mouseSensitivity;
     this.cameraCtl.invertY = this.settings.invertY;
-    this.renderer.shadowMap.enabled = this.settings.shadows;
-    this.gym.setShadows(this.settings.shadows);
-    // 그림자 설정 변경 시 재질 갱신이 필요
-    this.scene.traverse((o) => { if (o.material && 'needsUpdate' in o.material) o.material.needsUpdate = true; });
+
+    const q = QUALITY_PRESETS[this.settings.quality] || QUALITY_PRESETS.medium;
+    const dpr = window.devicePixelRatio || 1;
+    // 고해상도(레티나) 화면에서도 "보통" 이하는 1배 이하로 그려 픽셀 처리량을 줄임
+    const pixelRatio = q.pixelRatio > 1 ? Math.min(dpr, CONFIG.MAX_PIXEL_RATIO) : Math.min(dpr, q.pixelRatio);
+    this.renderer.setPixelRatio(pixelRatio);
+    if (this.renderer.shadowMap.enabled !== q.shadows) {
+      this.renderer.shadowMap.enabled = q.shadows;
+      // 그림자 on/off 시 셰이더 재컴파일 필요
+      this.scene.traverse((o) => { if (o.material && 'needsUpdate' in o.material) o.material.needsUpdate = true; });
+    }
+    this.gym.setQuality({ shadows: q.shadows, mirror: q.mirror });
+    this.playerModel.setCastShadow(q.shadows);
+    this.playerModel.setBlobShadow(!q.shadows);
     if (this.playerModel.nameTag) this.playerModel.nameTag.visible = this.settings.showNameTags;
+    this.hud.setFpsVisible(this.settings.showFps);
+    this._resize();
   }
 
   async openCustomizer() {
@@ -166,7 +178,18 @@ export class Game {
   }
 
   _frame() {
-    const dt = Math.min(0.05, this.clock.getDelta());
+    const rawDt = this.clock.getDelta();
+    const dt = Math.min(0.05, rawDt);
+
+    // FPS 측정 (0.5초마다 표시 갱신)
+    this._fps.frames++;
+    this._fps.time += rawDt;
+    if (this._fps.time >= 0.5) {
+      const info = this.renderer.info.render;
+      this.hud.setFps(this._fps.frames / this._fps.time, info.calls, info.triangles);
+      this._fps.frames = 0;
+      this._fps.time = 0;
+    }
 
     this.player.update(dt);
     this.cameraCtl.update(dt, this.player.position);

@@ -39,11 +39,22 @@ export function saveProfile(profile) {
   });
 }
 
+// 그래픽 품질 프리셋
+//  low    : 해상도 75%, 블롭 그림자
+//  medium : 해상도 100% (고해상도 화면에서도 1배), 블롭 그림자  ← 기본값
+//  high   : 해상도 최대 1.5배, 실시간 그림자, 실시간 거울 반사
+export const QUALITY_PRESETS = {
+  low: { label: '낮음', pixelRatio: 0.75, shadows: false, mirror: false },
+  medium: { label: '보통', pixelRatio: 1, shadows: false, mirror: false },
+  high: { label: '높음', pixelRatio: 1.5, shadows: true, mirror: true },
+};
+
 export const DEFAULT_SETTINGS = Object.freeze({
   mouseSensitivity: 1.0, // 배율
   invertY: false,
-  shadows: true,
+  quality: 'medium',
   showNameTags: true,
+  showFps: false,
 });
 
 export function loadSettings() {
@@ -51,8 +62,9 @@ export function loadSettings() {
   const s = { ...DEFAULT_SETTINGS };
   if (Number.isFinite(data.mouseSensitivity)) s.mouseSensitivity = Math.min(3, Math.max(0.2, data.mouseSensitivity));
   if (typeof data.invertY === 'boolean') s.invertY = data.invertY;
-  if (typeof data.shadows === 'boolean') s.shadows = data.shadows;
+  if (typeof data.quality === 'string' && QUALITY_PRESETS[data.quality]) s.quality = data.quality;
   if (typeof data.showNameTags === 'boolean') s.showNameTags = data.showNameTags;
+  if (typeof data.showFps === 'boolean') s.showFps = data.showFps;
   return s;
 }
 
