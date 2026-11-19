@@ -71,3 +71,20 @@ export function loadSettings() {
 export function saveSettings(settings) {
   return write(CONFIG.STORAGE_KEY_SETTINGS, settings);
 }
+
+// ── 서버별 재접속 토큰 ─────────────────────────────────
+// 토큰은 "이 브라우저가 그 캐릭터의 주인" 이라는 증명입니다. 다른 사람에게 알려주지 마세요.
+const TOKENS_KEY = 'onlinegym.tokens.v1';
+
+/** @returns {{nickname:string, token:string}|null} */
+export function loadToken(serverUrl) {
+  const all = read(TOKENS_KEY) || {};
+  const t = all[serverUrl];
+  return t && typeof t.token === 'string' && typeof t.nickname === 'string' ? t : null;
+}
+
+export function saveToken(serverUrl, nickname, token) {
+  const all = read(TOKENS_KEY) || {};
+  all[serverUrl] = { nickname, token };
+  return write(TOKENS_KEY, all);
+}

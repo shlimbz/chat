@@ -36,12 +36,12 @@ export class CharacterCreator {
    * @param {{mode:'create'|'edit', profile?:{nickname:string, appearance:object}}} opts
    * @returns {Promise<{nickname:string, appearance:object}|null>} 취소 시 null
    */
-  open({ mode = 'create', profile = null } = {}) {
+  open({ mode = 'create', profile = null, error = '' } = {}) {
     this.mode = mode;
     this.appearance = sanitizeAppearance(profile?.appearance || DEFAULT_APPEARANCE);
     this.nickInput.value = profile?.nickname || '';
     this.nickInput.disabled = mode === 'edit';
-    this.errorEl.textContent = '';
+    this.errorEl.textContent = error;
     this.titleEl.textContent = mode === 'edit' ? '캐릭터 커스터마이징' : '캐릭터 만들기';
     this.submitBtn.textContent = mode === 'edit' ? '저장하기' : '헬스장 입장하기';
     this.cancelBtn.classList.toggle('hidden', mode !== 'edit');

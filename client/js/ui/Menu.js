@@ -12,7 +12,8 @@ export class Menu {
     this.mainView = this._buildMain();
     this.settingsView = this._buildSettings();
     this.infoView = this._buildInfo();
-    this.panel = el('div', { class: 'menu-panel' }, [this.mainView, this.settingsView, this.infoView]);
+    this.playersView = this._buildPlayers();
+    this.panel = el('div', { class: 'menu-panel' }, [this.mainView, this.settingsView, this.infoView, this.playersView]);
     this.overlay = el('div', { id: 'menu', class: 'overlay dim hidden' }, [this.panel]);
     this.overlay.addEventListener('pointerdown', (e) => { if (e.target === this.overlay) this.close(); });
     root.append(this.overlay);
@@ -42,8 +43,10 @@ export class Menu {
     this.mainView.classList.toggle('hidden', name !== 'main');
     this.settingsView.classList.toggle('hidden', name !== 'settings');
     this.infoView.classList.toggle('hidden', name !== 'info');
+    this.playersView.classList.toggle('hidden', name !== 'players');
     if (name === 'settings') this._syncSettings();
     if (name === 'info') this._syncInfo();
+    if (name === 'players') this._syncPlayers();
   }
 
   _buildMain() {
@@ -65,7 +68,7 @@ export class Menu {
       btn('설정', () => this._show('settings')),
       btn('운동 기록', null, 'Phase 4 예정'),
       btn('성장 현황', null, 'Phase 5 예정'),
-      btn('접속자 목록', null, 'Phase 2 예정'),
+      btn('접속자 목록', () => this._show('players')),
     ]);
   }
 
@@ -85,7 +88,30 @@ export class Menu {
       row('레벨', 'Lv.1'),
       row('경험치', '— (Phase 5에서 구현)'),
       row('운동 기록', '— (Phase 4에서 구현)'),
-      row('저장 위치', '이 브라우저 (서버 저장은 Phase 2)'),
+      row('저장 위치', p.online ? '게임 서버' : '이 브라우저 (오프라인 모드)'),
+    );
+  }
+
+  _buildPlayers() {
+    this.playersBody = el('div', { class: 'menu-players' });
+    return el('div', { class: 'menu-view hidden' }, [
+      el('h3', { text: '접속자 목록' }),
+      this.playersBody,
+      el('button', { class: 'menu-btn', attrs: { type: 'button' }, text: '← 돌아가기', on: { click: () => this._show('main') } }),
+    ]);
+  }
+
+  _syncPlayers() {
+    const list = this.h.getPlayers?.() || [];
+    this.playersBody.replaceChildren(
+      el('div', { class: 'menu-hint', text: `현재 ${list.length}명` }),
+      ...list.map((p) => {
+        const r = el('div', { class: 'menu-info-row' }, [el('b', { text: p.self ? `${p.nickname} (나)` : p.nickname })]);
+        if (!p.self) {
+          r.append(el('button', { class: 'chip', attrs: { type: 'button' }, text: '귓속말', on: { click: () => this.h.onWhisper?.(p.nickname) } }));
+        }
+        return r;
+      }),
     );
   }
 

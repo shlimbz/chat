@@ -1,7 +1,8 @@
 // 로컬 플레이어 이동 처리
-// 카메라 방향 기준 WASD 이동 + 가속/감속 + 충돌 + 회전 보간
+// 카메라 방향 기준 WASD 이동 + 가속/감속 + 충돌 + 회전 보간 + 점프(Space)
 // getNetworkState() 는 Phase 2 에서 서버로 보낼 최소 상태를 반환합니다.
 import { CONFIG } from '../config.js';
+import { actionToIndex } from '../shared/protocol.js';
 
 export class PlayerController {
   /**
@@ -20,12 +21,22 @@ export class PlayerController {
     this.velocity = { x: 0, z: 0 };
     this.rotY = 0;
     this.speed = 0;
+    this.vy = 0;
+    this.grounded = true;
+    this._jumpQueued = 0;
     this.locked = false; // 운동 중 등 이동 불가 상태 (Phase 4)
+
+    input.onPress('Space', () => {
+      if (this.input.enabled && !this.locked) this._jumpQueued = 0.12; // 착지 직전 입력도 0.12초간 기억
+    });
   }
 
-  teleport(x, z, rotY = this.rotY) {
+  teleport(x, z, rotY = this.rotY, y = 0) {
     this.position.x = x;
     this.position.z = z;
+    this.position.y = y;
+    this.vy = 0;
+    this.grounded = y <= 0;
     this.rotY = rotY;
     this.velocity.x = 0;
     this.velocity.z = 0;
@@ -67,6 +78,23 @@ export class PlayerController {
       this.velocity.z *= 0.5;
     }
 
+    // 점프 / 중력
+    this._jumpQueued = Math.max(0, this._jumpQueued - dt);
+    if (this._jumpQueued > 0 && this.grounded && !this.locked) {
+      this.vy = CONFIG.JUMP_VELOCITY;
+      this.grounded = false;
+      this._jumpQueued = 0;
+    }
+    if (!this.grounded) {
+      this.vy -= CONFIG.GRAVITY * dt;
+      this.position.y += this.vy * dt;
+      if (this.position.y <= 0) {
+        this.position.y = 0;
+        this.vy = 0;
+        this.grounded = true;
+      }
+    }
+
     // 이동 방향으로 회전
     if (len > 0) {
       const targetRot = Math.atan2(mx, mz);
@@ -74,17 +102,13 @@ export class PlayerController {
     }
 
     this._syncModel();
-    this.model.update(dt, this.speed);
+    this.model.update(dt, this.speed, !this.grounded);
   }
 
-  /** Phase 2: 서버 전송용 상태 (소수점 2자리로 축약해 전송량 절감) */
+  /** 서버 전송용 상태 [x, y, z, 회전, 동작번호] (소수점 2자리로 축약해 전송량 절감) */
   getNetworkState() {
-    return {
-      x: round2(this.position.x),
-      z: round2(this.position.z),
-      r: round2(this.rotY),
-      a: this.model.action,
-    };
+    const r = Math.atan2(Math.sin(this.rotY), Math.cos(this.rotY));
+    return [round2(this.position.x), round2(this.position.y), round2(this.position.z), round2(r), actionToIndex(this.model.action)];
   }
 
   _syncModel() {

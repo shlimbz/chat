@@ -1,24 +1,55 @@
 // ─────────────────────────────────────────────────────────────
 // ONLINE GYM 환경 설정
 // 배포 환경에 맞게 이 파일만 수정하면 됩니다.
-// index.html 에서 window.ONLINE_GYM_CONFIG 로 덮어쓸 수도 있습니다.
 // ─────────────────────────────────────────────────────────────
 
+// ★ 게임 서버를 배포한 뒤, 그 주소를 여기에 입력하세요. (예: 'https://online-gym-server.onrender.com')
+//   비워두면 localhost 에서 접속할 때만 http://localhost:3000 서버를 사용하고,
+//   그 외에는 오프라인 모드로 실행됩니다.
+const DEPLOYED_SERVER_URL = '';
+
 const override = (typeof window !== 'undefined' && window.ONLINE_GYM_CONFIG) || {};
+const SERVER_KEY = 'onlinegym.server.v1';
+
+/**
+ * 서버 주소 결정 순서
+ *  1) 주소창의 ?server=주소  (테스트용, 브라우저에 기억됨)
+ *     ?server=off → 오프라인 모드 고정,  ?server= (빈 값) → 기억한 주소 삭제
+ *  2) index.html 의 window.ONLINE_GYM_CONFIG.SERVER_URL
+ *  3) 위의 DEPLOYED_SERVER_URL
+ *  4) localhost 로 접속 중이면 http://localhost:3000
+ */
+export function resolveServerUrl() {
+  if (typeof window === 'undefined') return '';
+  try {
+    const q = new URLSearchParams(window.location.search).get('server');
+    if (q !== null) {
+      if (q === '') window.localStorage.removeItem(SERVER_KEY); // ?server=  → 기본값으로 되돌림
+      else window.localStorage.setItem(SERVER_KEY, q === 'off' ? 'off' : q.replace(/\/$/, ''));
+    }
+    const saved = window.localStorage.getItem(SERVER_KEY);
+    if (saved === 'off') return ''; // ?server=off → 항상 오프라인 모드
+    if (saved) return saved;
+  } catch { /* localStorage 사용 불가 */ }
+  if (override.SERVER_URL) return override.SERVER_URL.replace(/\/$/, '');
+  if (DEPLOYED_SERVER_URL) return DEPLOYED_SERVER_URL.replace(/\/$/, '');
+  const host = window.location.hostname;
+  if (host === 'localhost' || host === '127.0.0.1') return `${window.location.protocol}//${host}:3000`;
+  return '';
+}
 
 export const CONFIG = {
-  // Phase 2부터 사용: Socket.IO 게임 서버 주소
-  SERVER_URL: override.SERVER_URL || 'http://localhost:3000',
-
   // 렌더링
   MAX_PIXEL_RATIO: 1.5, // "높음" 품질의 최대 해상도 배율
 
   // 이동
   WALK_SPEED: 3.2, // m/s
-  RUN_SPEED: 6.0, // m/s (Shift)
+  RUN_SPEED: 6.0, // m/s (Shift) — 서버 MAX_MOVE_SPEED 와 같아야 함
   ACCELERATION: 14,
   TURN_SPEED: 12,
   PLAYER_RADIUS: 0.35,
+  JUMP_VELOCITY: 4.6, // m/s → 최고 높이 약 0.8m
+  GRAVITY: 13, // m/s²
 
   // 카메라
   CAMERA_MIN_DISTANCE: 2.0,
@@ -29,6 +60,10 @@ export const CONFIG = {
 
   // 상호작용
   INTERACT_RANGE: 1.6,
+
+  // 네트워크
+  CONNECT_TIMEOUT_MS: 10000,
+  INTERPOLATION_DELAY_MS: 150, // 다른 플레이어를 이만큼 과거 시점으로 그려 끊김 없이 보간
 
   // 로컬 저장소 키
   STORAGE_KEY_PROFILE: 'onlinegym.profile.v1',

@@ -102,6 +102,9 @@ export class CharacterModel {
     this.animPhase = 0;
     this.moveBlend = 0;
     this.runBlend = 0;
+    this.airBlend = 0;
+    this.landT = 0;
+    this._wasAirborne = false;
     this.time = Math.random() * 10;
     this.action = 'idle'; // 네트워크 동기화용 (idle | walk | run | exercise:*)
 
@@ -174,42 +177,53 @@ export class CharacterModel {
    * 매 프레임 호출 (회전값 몇 개만 바꾸므로 매우 가벼움)
    * @param {number} dt
    * @param {number} speed 수평 이동 속도 (m/s)
+   * @param {boolean} airborne 공중에 떠 있는지 (점프)
    */
-  update(dt, speed = 0) {
+  update(dt, speed = 0, airborne = false) {
     const p = this.parts;
     if (!p) return;
     this.time += dt;
 
-    const targetMove = Math.min(1, speed / 2.2);
+    const targetMove = airborne ? 0 : Math.min(1, speed / 2.2);
     const targetRun = Math.min(1, Math.max(0, (speed - 3.4) / 2.4));
     this.moveBlend += (targetMove - this.moveBlend) * Math.min(1, dt * 10);
     this.runBlend += (targetRun - this.runBlend) * Math.min(1, dt * 6);
-    this.action = this.moveBlend < 0.15 ? 'idle' : (this.runBlend > 0.5 ? 'run' : 'walk');
+    this.airBlend += ((airborne ? 1 : 0) - this.airBlend) * Math.min(1, dt * (airborne ? 18 : 12));
+    // 착지 순간 살짝 찌그러지는 효과
+    if (this._wasAirborne && !airborne) this.landT = 0.18;
+    this._wasAirborne = airborne;
+    this.landT = Math.max(0, this.landT - dt);
+
+    if (airborne) this.action = 'jump';
+    else this.action = this.moveBlend < 0.15 ? 'idle' : (this.runBlend > 0.5 ? 'run' : 'walk');
 
     this.animPhase = (this.animPhase + dt * (5 + speed * 1.9)) % TAU;
     const ph = this.animPhase;
     const m = this.moveBlend;
     const r = this.runBlend;
+    const air = this.airBlend;
     const s = Math.sin(ph);
     const swing = (0.6 + 0.3 * r) * m;
 
-    p.legL.rotation.x = -s * swing;
-    p.legR.rotation.x = s * swing;
-    p.armL.rotation.x = s * swing * 1.1;
-    p.armR.rotation.x = -s * swing * 1.1;
-    const armOut = 0.32 - 0.12 * m + Math.sin(this.time * 1.8) * 0.03 * (1 - m);
+    // 걷기 ↔ 점프 포즈 혼합 (점프: 만세 + 다리 앞뒤로)
+    const mix = (walk, jump) => walk * (1 - air) + jump * air;
+    p.legL.rotation.x = mix(-s * swing, -0.55);
+    p.legR.rotation.x = mix(s * swing, 0.35);
+    p.armL.rotation.x = mix(s * swing * 1.1, -0.25);
+    p.armR.rotation.x = mix(-s * swing * 1.1, -0.25);
+    const armOut = mix(0.32 - 0.12 * m + Math.sin(this.time * 1.8) * 0.03 * (1 - m), 2.3);
     p.armL.rotation.z = -armOut;
     p.armR.rotation.z = armOut;
 
     // 통통 튀는 걸음 + 뒤뚱뒤뚱
-    p.hips.position.y = HIP_Y + Math.abs(Math.cos(ph)) * (0.045 + 0.04 * r) * m;
-    p.torso.rotation.z = s * 0.07 * m * (1 - r * 0.5);
-    p.torso.rotation.x = 0.14 * r * m;
-    // 숨쉬기 (몸통 메시만 살짝 늘었다 줄었다)
-    const breathe = Math.sin(this.time * 2.4) * 0.02 * (1 - m);
-    p.torsoMesh.scale.set(1 - breathe * 0.5, 1 + breathe, 1);
+    p.hips.position.y = HIP_Y + Math.abs(Math.cos(ph)) * (0.045 + 0.04 * r) * m * (1 - air);
+    p.torso.rotation.z = s * 0.07 * m * (1 - r * 0.5) * (1 - air);
+    p.torso.rotation.x = 0.14 * r * m - 0.08 * air;
+    // 숨쉬기 + 착지 찌그러짐 (몸통 메시만)
+    const breathe = Math.sin(this.time * 2.4) * 0.02 * (1 - m) - (this.landT / 0.18) * 0.12;
+    p.torsoMesh.scale.set(1 - breathe * 0.5, 1 + breathe, 1 - breathe * 0.5);
     p.head.rotation.z = Math.sin(this.time * 1.3) * 0.05 * (1 - m) - s * 0.04 * m;
-    p.head.rotation.x = -0.08 * r * m;
+    p.head.rotation.x = -0.08 * r * m - 0.12 * air;
   }
 
   dispose() {

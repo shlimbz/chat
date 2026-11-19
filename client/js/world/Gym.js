@@ -316,10 +316,11 @@ export class Gym {
     // 안내판 (입구 옆, 입구 쪽을 바라봄)
     this._place(createSignboard('ONLINE GYM 안내', [
       '이동: W A S D  (Shift 달리기)',
+      '점프: Space   채팅: Enter',
       '카메라: 마우스 드래그 / 휠 줌',
       '운동기구: 가까이 가서 E',
-      '메뉴: ESC',
-      '운동 미니게임은 Phase 4에서 추가',
+      '귓속말: /w 닉네임 메시지',
+      '메뉴: ESC   명령어: /help',
     ]), -3.6, 9.6, 0, 'sign');
     // 빈 휴식 벤치 하나 더 (머신 구역 옆)
     this._place(createRestBench(1.6), -5.5, 9.5, 0, 'rest-bench-3');

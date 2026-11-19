@@ -2,7 +2,7 @@
 // 좌상단: 닉네임/레벨 · 우상단: 접속자 수 · 좌하단: 채팅 자리 · 하단 중앙: 상호작용 안내 · 우하단: 상태
 import { el } from './dom.js';
 
-const ACTION_LABEL = { idle: '대기', walk: '걷는 중', run: '달리는 중' };
+const ACTION_LABEL = { idle: '대기', walk: '걷는 중', run: '달리는 중', jump: '점프!' };
 
 export class HUD {
   constructor(root) {
@@ -17,10 +17,8 @@ export class HUD {
     this.onlineEl = el('div', { class: 'hud-online' });
     this.root.append(el('div', { class: 'hud-box hud-top-right' }, [this.onlineEl]));
 
-    // 좌하단: 채팅 (Phase 3 에서 ChatPanel 이 이 자리를 사용)
-    this.chatSlot = el('div', { class: 'hud-chat-slot' }, [
-      el('div', { class: 'hud-box hud-chat-placeholder', text: '💬 채팅은 Phase 3(서버 연결 후)에 활성화됩니다' }),
-    ]);
+    // 좌하단: 채팅 (ChatPanel 이 이 자리를 사용)
+    this.chatSlot = el('div', { class: 'hud-chat-slot' });
     this.root.append(this.chatSlot);
 
     // 하단 중앙: 상호작용 안내
@@ -41,9 +39,11 @@ export class HUD {
     this.helpEl = el('div', { class: 'hud-help' }, [
       el('span', { html: '<b>WASD</b> 이동' }),
       el('span', { html: '<b>Shift</b> 달리기' }),
+      el('span', { html: '<b>Space</b> 점프' }),
       el('span', { html: '<b>드래그</b> 카메라' }),
       el('span', { html: '<b>휠</b> 줌' }),
       el('span', { html: '<b>E</b> 기구 이용' }),
+      el('span', { html: '<b>Enter</b> 채팅' }),
       el('span', { html: '<b>ESC</b> 메뉴' }),
     ]);
     this.root.append(this.helpEl);
@@ -66,8 +66,10 @@ export class HUD {
     this.levelEl.textContent = `Lv.${level}`;
   }
 
-  setOnline(count, offline = false) {
-    this.onlineEl.textContent = offline ? `접속자 ${count}명 · 오프라인 모드` : `접속자 ${count}명`;
+  /** @param {{count:number, max?:number, label?:string, state:'online'|'warn'|'offline'}} o */
+  setOnline({ count, max, label, state }) {
+    this.onlineEl.textContent = label ? `접속자 ${count}명 · ${label}` : `접속자 ${count}${max ? ` / ${max}` : ''}명`;
+    this.onlineEl.dataset.state = state;
   }
 
   setPrompt(text) {
