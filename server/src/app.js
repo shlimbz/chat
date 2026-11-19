@@ -17,6 +17,8 @@ import { AccountService } from './services/AccountService.js';
 import { CharacterService, characterSummary } from './services/CharacterService.js';
 import { ChatService, RateLimiter } from './services/ChatService.js';
 import { attachGameHandlers } from './socket/handlers.js';
+import { EconomyService } from './services/EconomyService.js';
+import { StatsService } from './services/StatsService.js';
 import { MAX_CHARACTERS } from '../../client/js/shared/protocol.js';
 
 export async function createGameServer(config, { log = console.log, libsqlClient } = {}) {
@@ -175,8 +177,10 @@ export async function createGameServer(config, { log = console.log, libsqlClient
     pingTimeout: 20000,
   });
 
+  const economy = new EconomyService(db);
+  const stats = new StatsService(db);
   const game = attachGameHandlers(io, {
-    config, accounts, characters, chat, log,
+    config, accounts, characters, chat, economy, stats, log,
   });
 
   app.get('/health', (req, res) => {

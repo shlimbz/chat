@@ -91,21 +91,26 @@ export function createStretchZone() {
 /** 샌드백 (천장에 매달림) — swing 부분은 움직이므로 정적 병합에서 제외 */
 export function createPunchingBag() {
   const g = new THREE.Group();
-  cyl(g, 0.012, 0.012, 1.6, '#8a8f99', 0, 4.2, 0, 6);
+  // 천장에서 내려온 봉 → 매달린 지점 (샌드백 가운데가 캐릭터 가슴~얼굴 높이)
+  cyl(g, 0.012, 0.012, 2.4, '#8a8f99', 0, 3.8, 0, 6);
+  cyl(g, 0.06, 0.06, 0.05, '#59606e', 0, 2.6, 0, 10);
   const swing = new THREE.Group();
-  swing.position.y = 3.4; // 매달린 지점
+  swing.position.y = 2.6; // 매달린 지점
   swing.userData.dynamic = true;
   const bag = new THREE.Mesh(new THREE.CapsuleGeometry(0.26, 0.9, 6, 14), m('#c0392b'));
-  bag.position.y = -1.6;
+  bag.position.y = -1.62; // 가운데 높이 약 0.98m (바닥에서 0.42~1.54m)
   swing.add(bag);
   const band = new THREE.Mesh(new THREE.CylinderGeometry(0.265, 0.265, 0.08, 14), m('#2b2d33'));
   band.position.y = -1.3;
+  const band2 = new THREE.Mesh(new THREE.CylinderGeometry(0.265, 0.265, 0.06, 14), m('#2b2d33'));
+  band2.position.y = -1.95;
+  swing.add(band2);
   swing.add(band);
   const chain = new THREE.Mesh(new THREE.CylinderGeometry(0.01, 0.01, 0.9, 6), m('#8a8f99'));
-  chain.position.y = -0.55;
+  chain.position.y = -0.43;
   swing.add(chain);
   g.add(swing);
-  return { group: g, colliders: [{ minX: -0.3, maxX: 0.3, minZ: -0.3, maxZ: 0.3, top: 2.4 }], swing };
+  return { group: g, colliders: [{ minX: -0.3, maxX: 0.3, minZ: -0.3, maxZ: 0.3, top: 1.6 }], swing };
 }
 
 /** 사물함 줄 */
@@ -171,7 +176,7 @@ export function createFloorTrack(w, d) {
   const line = (x, z, lw, ld) => {
     const p = new THREE.Mesh(new THREE.PlaneGeometry(lw, ld), m('#f6d55c'));
     p.rotation.x = -Math.PI / 2;
-    p.position.set(x, 0.008, z);
+    p.position.set(x, 0.03, z); // 매트보다 위
     g.add(p);
   };
   const t = 0.08;
@@ -205,4 +210,68 @@ export function createPoster(title, sub, bg, fg) {
   const mesh = new THREE.Mesh(new THREE.PlaneGeometry(1.0, 1.4), new THREE.MeshBasicMaterial({ map: tex }));
   g.add(mesh);
   return { group: g, colliders: [] };
+}
+
+// ── 라운지 (쉬면서 모여 이야기하는 공간) ─────────────────────
+/** 소파: 앞이 +z. 좌석 윗면 0.46 (점프로 올라설 수 있음), 등받이는 높아서 막힘 */
+export function createSofa(seats = 3, color = '#3caea3') {
+  const g = new THREE.Group();
+  const W = seats * 0.72 + 0.3;
+  const dark = '#2b8f86';
+  box(g, W, 0.24, 0.78, dark, 0, 0.16, 0); // 받침
+  for (let i = 0; i < seats; i++) {
+    const x = (i - (seats - 1) / 2) * 0.72;
+    box(g, 0.68, 0.14, 0.62, color, x, 0.37, 0.06); // 방석
+    box(g, 0.68, 0.46, 0.18, color, x, 0.66, -0.29).rotation.x = -0.12; // 등쿠션
+  }
+  box(g, W, 0.62, 0.16, dark, 0, 0.55, -0.36); // 등받이 틀
+  for (const s of [-1, 1]) box(g, 0.16, 0.56, 0.78, dark, s * (W / 2 - 0.08), 0.32, 0); // 팔걸이
+  for (const s of [-1, 1]) for (const z of [-0.3, 0.3]) cyl(g, 0.03, 0.03, 0.06, '#2b2d33', s * (W / 2 - 0.12), 0.03, z, 6);
+  return {
+    group: g,
+    colliders: [
+      { minX: -W / 2, maxX: W / 2, minZ: -0.39, maxZ: 0.39, top: 0.46 },
+      { minX: -W / 2, maxX: W / 2, minZ: -0.45, maxZ: -0.2, top: 0.95 },
+    ],
+    seatXs: [...Array(seats).keys()].map((i) => (i - (seats - 1) / 2) * 0.72),
+  };
+}
+
+export function createArmchair(color = '#f9a03f') {
+  const r = createSofa(1, color);
+  return r;
+}
+
+/** 둥근 커피 테이블 + 소품 */
+export function createCoffeeTable() {
+  const g = new THREE.Group();
+  cyl(g, 0.62, 0.62, 0.06, PALETTE.wood, 0, 0.42, 0, 20);
+  cyl(g, 0.08, 0.12, 0.38, '#2b2d33', 0, 0.2, 0, 10);
+  cyl(g, 0.3, 0.3, 0.03, '#2b2d33', 0, 0.015, 0, 14);
+  // 머그컵·잡지·과일 그릇
+  for (const [x, z, c] of [[0.25, 0.12, '#f4f4f4'], [-0.2, -0.22, '#e8505b']]) {
+    cyl(g, 0.045, 0.04, 0.09, c, x, 0.5, z, 10);
+  }
+  box(g, 0.24, 0.015, 0.32, '#3d7dd8', -0.15, 0.46, 0.18).rotation.y = 0.4;
+  cyl(g, 0.13, 0.08, 0.06, '#f4f4f4', 0.12, 0.48, -0.15, 12);
+  for (const [x, z, c] of [[0.1, -0.13, '#f9a03f'], [0.16, -0.18, '#5bbf6a'], [0.13, -0.1, '#e8505b']]) sph(g, 0.04, c, x, 0.53, z, 8);
+  return { group: g, colliders: [{ minX: -0.62, maxX: 0.62, minZ: -0.62, maxZ: 0.62, top: 0.45 }] };
+}
+
+/** 둥근 러그 (바닥에 깔림, 매트보다 위) */
+export function createRug(radius = 2.4, color = '#f2e3c6', ring = '#e3b98a') {
+  const g = new THREE.Group();
+  cyl(g, radius, radius, 0.012, ring, 0, 0.026, 0, 32);
+  cyl(g, radius * 0.86, radius * 0.86, 0.012, color, 0, 0.03, 0, 32);
+  return { group: g, colliders: [] };
+}
+
+export function createFloorLamp() {
+  const g = new THREE.Group();
+  cyl(g, 0.18, 0.2, 0.04, '#2b2d33', 0, 0.02, 0, 12);
+  cyl(g, 0.02, 0.02, 1.5, '#2b2d33', 0, 0.78, 0, 6);
+  const shade = new THREE.Mesh(new THREE.CylinderGeometry(0.16, 0.26, 0.3, 14, 1, true), m('#fff3d6', { emissive: '#ffe2a0', emissiveIntensity: 0.5 }));
+  shade.position.y = 1.6;
+  g.add(shade);
+  return { group: g, colliders: [{ minX: -0.2, maxX: 0.2, minZ: -0.2, maxZ: 0.2, top: 1.8 }] };
 }

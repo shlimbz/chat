@@ -66,6 +66,12 @@ export function parseChatInput(raw) {
       if (!target) return { kind: 'error', error: '사용법: /unmute 닉네임' };
       return { kind: 'admin', action: 'unmute', target };
     }
+    case '/give': {
+      const [target, amt] = rest;
+      const amount = Number.parseInt(amt, 10);
+      if (!target || !Number.isFinite(amount) || amount === 0) return { kind: 'error', error: '사용법: /give 닉네임 코인 (음수면 회수)' };
+      return { kind: 'admin', action: 'give', target, amount };
+    }
     case '/notice':
     case '/공지': {
       const body = rest.join(' ').trim();
@@ -93,6 +99,7 @@ export const ADMIN_HELP_TEXT = [
   '/unban 계정아이디 — 이용 제한 해제',
   '/mute 닉네임 [분] — 채팅 금지 (기본 10분) · /unmute 닉네임',
   '/notice 내용 — 전체 공지',
+  '/give 닉네임 코인 — 코인 지급 (음수면 회수)',
   '/delchar 닉네임 — 캐릭터 삭제 · /deluser 계정아이디 — 계정 삭제',
 ];
 

@@ -15,6 +15,17 @@ export class HUD {
     this.nameEl = el('div', { class: 'hud-name' });
     this.levelEl = el('div', { class: 'hud-level', text: 'Lv.1' });
     this.root.append(el('div', { class: 'hud-box hud-top-left' }, [this.levelEl, this.nameEl]));
+    // 코인 (누르면 상점)
+    this.coinVal = el('span', { text: '0' });
+    this.coinBtn = el('button', { class: 'hud-coins hidden', attrs: { type: 'button', title: '치장 상점 열기' } }, [el('span', { text: '🪙' }), this.coinVal, el('span', { class: 'hud-coins-shop', text: '상점' })]);
+    this.coinBtn.addEventListener('click', () => this.onCoinClick?.());
+    this.bagBtn = el('button', { class: 'hud-quick-btn', attrs: { type: 'button', title: '가방 (I)' }, html: '🎒 <span>가방</span><kbd>I</kbd>' });
+    this.bagBtn.addEventListener('click', () => this.onBagClick?.());
+    this.rankBtn = el('button', { class: 'hud-quick-btn', attrs: { type: 'button', title: '오늘의 랭킹' }, html: '🏆 <span>랭킹</span>' });
+    this.rankBtn.addEventListener('click', () => this.onRankClick?.());
+    this.quick = el('div', { class: 'hud-quick hidden' }, [this.coinBtn, this.bagBtn, this.rankBtn]);
+    this.coinBtn.classList.remove('hidden');
+    this.root.append(this.quick);
 
     // 우상단
     this.onlineEl = el('div', { class: 'hud-online' });
@@ -46,6 +57,7 @@ export class HUD {
       el('span', { html: '<b>드래그</b> 카메라' }),
       el('span', { html: '<b>휠</b> 줌' }),
       el('span', { html: '<b>E</b> 기구 이용' }),
+      el('span', { html: '<b>I</b> 가방' }),
       this.attackHelp = el('span', { html: '<b>J</b> 주먹 <b>K</b> 발차기' }),
       el('span', { html: '<b>Enter</b> 채팅' }),
       el('span', { html: '<b>ESC</b> 메뉴' }),
@@ -123,6 +135,22 @@ export class HUD {
 
   setVisible(v) {
     this.root.classList.toggle('hidden', !v);
+  }
+
+  /** 코인 표시 (null 이면 숨김 = 오프라인) */
+  setCoins(n) {
+    this.quick.classList.toggle('hidden', n === null);
+    if (n !== null) this.coinVal.textContent = Number(n).toLocaleString();
+  }
+
+  /** "+1" 이 코인 표시 옆에서 떠오름 */
+  coinPop(n) {
+    const pop = el('div', { class: 'coin-pop', text: `+${n}` });
+    this.coinBtn.append(pop);
+    this.coinBtn.classList.remove('bump');
+    void this.coinBtn.offsetWidth;
+    this.coinBtn.classList.add('bump');
+    setTimeout(() => pop.remove(), 900);
   }
 }
 

@@ -5,6 +5,7 @@
 import crypto from 'node:crypto';
 import { promisify } from 'node:util';
 import { validateUsername, validatePassword } from '../../../client/js/shared/protocol.js';
+import { ECONOMY } from '../../../client/js/shared/economy.js';
 
 const scrypt = promisify(crypto.scrypt);
 const SESSION_DAYS = 30;
@@ -110,8 +111,8 @@ export class AccountService {
     const hash = await hashPassword(password);
     try {
       const res = await this.db.run(
-        'INSERT INTO accounts (username, password_hash, created_at, last_login_at) VALUES (?, ?, ?, ?)',
-        [u.value, hash, Date.now(), Date.now()],
+        'INSERT INTO accounts (username, password_hash, created_at, last_login_at, coins) VALUES (?, ?, ?, ?, ?)',
+        [u.value, hash, Date.now(), Date.now(), ECONOMY.STARTING_COINS],
       );
       const account = await this.findById(res.lastInsertRowid);
       return { ok: true, account, token: await this._createSession(account.id) };

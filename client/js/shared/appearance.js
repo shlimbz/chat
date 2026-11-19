@@ -22,7 +22,7 @@ export const BODY_PRESETS = [
   { id: 'chubby', label: '통통', muscle: 0.2, weight: 1 },
 ];
 
-export const SKIN_COLORS = ['#ffe3cc', '#f6cba3', '#e2ad80', '#c68b5c', '#9b6643', '#6b4531'];
+export const SKIN_COLORS = ['#ffe9d6', '#ffe3cc', '#f6cba3', '#e2ad80', '#c68b5c', '#9b6643', '#6b4531', '#ffd2c2'];
 
 export const HAIR_STYLES = [
   { id: 'short', label: '숏컷' },
@@ -57,6 +57,16 @@ export const EYE_STYLES = [
   { id: 'sleepy', label: '졸린 눈' },
   { id: 'sharp', label: '날카로운 눈' },
   { id: 'smile', label: '웃는 눈' },
+  { id: 'dot', label: '콩알 눈' },
+  { id: 'lash', label: '속눈썹 눈' },
+  { id: 'wink', label: '윙크' },
+];
+export const EYE_COLORS = ['#2b2420', '#5a3a22', '#3d7dd8', '#3caea3', '#8e6bd8', '#e8505b'];
+export const CHEEK_STYLES = [
+  { id: 'blush', label: '볼터치' },
+  { id: 'rosy', label: '진한 볼터치' },
+  { id: 'freckles', label: '주근깨' },
+  { id: 'none', label: '없음' },
 ];
 export const BROW_STYLES = [
   { id: 'soft', label: '부드러운 눈썹' },
@@ -96,16 +106,72 @@ export const SHOES = [
 
 export const SHOE_COLORS = ['#ffffff', '#2b2d33', '#e8505b', '#3d7dd8', '#3caea3', '#f6d55c'];
 
-// ── 악세사리 (나중에 게임 재화로 구매 — 지금은 카탈로그와 모델 표시만 준비) ──
-export const ACC_SLOTS = ['hat', 'eyes', 'neck', 'ears'];
+// ── 악세사리 / 치장 아이템 (게임 재화로 구매, 샵에서 사고팔기) ──
+// slot 하나에 아이템 하나만 착용. price = 구매가 (판매가는 economy.js 의 SELL_RATE)
+export const ACC_SLOTS = ['hat', 'eyes', 'neck', 'ears', 'feet', 'print', 'back', 'trail', 'aura'];
+export const ACC_SLOT_LABELS = {
+  hat: '모자', eyes: '안경', neck: '목', ears: '귀', feet: '신발', print: '옷 디자인', back: '등', trail: '트레일', aura: '오라',
+};
+export const RARITY = {
+  common: { label: '일반', color: '#8a96a3' },
+  rare: { label: '레어', color: '#3d7dd8' },
+  epic: { label: '에픽', color: '#8e6bd8' },
+  legend: { label: '전설', color: '#e8a23a' },
+};
 export const ACCESSORIES = [
-  { id: 'cap', slot: 'hat', label: '야구모자', price: 300 },
-  { id: 'beanie', slot: 'hat', label: '비니', price: 300 },
-  { id: 'headband', slot: 'hat', label: '헤어밴드', price: 150 },
-  { id: 'round_glasses', slot: 'eyes', label: '동그란 안경', price: 200 },
-  { id: 'sunglasses', slot: 'eyes', label: '선글라스', price: 250 },
-  { id: 'necklace', slot: 'neck', label: '목걸이', price: 400 },
-  { id: 'earrings', slot: 'ears', label: '귀걸이', price: 350 },
+  // 모자
+  { id: 'headband', slot: 'hat', label: '헤어밴드', price: 150, rarity: 'common' },
+  { id: 'cap', slot: 'hat', label: '야구모자', price: 300, rarity: 'common' },
+  { id: 'beanie', slot: 'hat', label: '비니', price: 300, rarity: 'common' },
+  { id: 'party_hat', slot: 'hat', label: '고깔모자', price: 350, rarity: 'common' },
+  { id: 'cat_ears', slot: 'hat', label: '고양이 귀', price: 500, rarity: 'rare' },
+  { id: 'bunny_ears', slot: 'hat', label: '토끼 귀', price: 500, rarity: 'rare' },
+  { id: 'headphones', slot: 'hat', label: '헤드폰', price: 700, rarity: 'rare' },
+  { id: 'cowboy', slot: 'hat', label: '카우보이 모자', price: 900, rarity: 'epic' },
+  { id: 'crown', slot: 'hat', label: '왕관', price: 2500, rarity: 'legend' },
+  { id: 'halo', slot: 'hat', label: '천사 링', price: 3000, rarity: 'legend' },
+  // 안경
+  { id: 'round_glasses', slot: 'eyes', label: '동그란 안경', price: 200, rarity: 'common' },
+  { id: 'sunglasses', slot: 'eyes', label: '선글라스', price: 250, rarity: 'common' },
+  { id: 'heart_glasses', slot: 'eyes', label: '하트 안경', price: 600, rarity: 'rare' },
+  { id: 'star_glasses', slot: 'eyes', label: '별 안경', price: 600, rarity: 'rare' },
+  { id: 'ski_goggles', slot: 'eyes', label: '스키 고글', price: 900, rarity: 'epic' },
+  // 목 / 귀
+  { id: 'bowtie', slot: 'neck', label: '나비넥타이', price: 250, rarity: 'common' },
+  { id: 'scarf', slot: 'neck', label: '목도리', price: 350, rarity: 'common' },
+  { id: 'necklace', slot: 'neck', label: '목걸이', price: 400, rarity: 'common' },
+  { id: 'gold_chain', slot: 'neck', label: '금 체인', price: 1000, rarity: 'epic' },
+  { id: 'medal', slot: 'neck', label: '금메달', price: 1500, rarity: 'epic' },
+  { id: 'earrings', slot: 'ears', label: '귀걸이', price: 350, rarity: 'common' },
+  { id: 'gold_hoops', slot: 'ears', label: '링 귀걸이', price: 600, rarity: 'rare' },
+  // 신발 (기본 신발 대신 착용)
+  { id: 'neon_kicks', slot: 'feet', label: '네온 운동화', price: 700, rarity: 'rare' },
+  { id: 'bunny_slippers', slot: 'feet', label: '토끼 슬리퍼', price: 700, rarity: 'rare' },
+  { id: 'gold_kicks', slot: 'feet', label: '황금 운동화', price: 1500, rarity: 'epic' },
+  { id: 'rocket_boots', slot: 'feet', label: '로켓 부츠', price: 2800, rarity: 'legend' },
+  // 옷 디자인 (상의 색 위에 그려짐)
+  { id: 'print_stripes', slot: 'print', label: '줄무늬', price: 300, rarity: 'common' },
+  { id: 'print_star', slot: 'print', label: '별', price: 400, rarity: 'common' },
+  { id: 'print_heart', slot: 'print', label: '하트', price: 400, rarity: 'common' },
+  { id: 'print_bolt', slot: 'print', label: '번개', price: 600, rarity: 'rare' },
+  { id: 'print_flame', slot: 'print', label: '불꽃', price: 800, rarity: 'rare' },
+  { id: 'print_paw', slot: 'print', label: '발바닥', price: 600, rarity: 'rare' },
+  // 등
+  { id: 'backpack', slot: 'back', label: '책가방', price: 500, rarity: 'common' },
+  { id: 'cape', slot: 'back', label: '히어로 망토', price: 1200, rarity: 'epic' },
+  { id: 'jetpack', slot: 'back', label: '제트팩', price: 2500, rarity: 'legend' },
+  { id: 'angel_wings', slot: 'back', label: '천사 날개', price: 3000, rarity: 'legend' },
+  { id: 'devil_wings', slot: 'back', label: '악마 날개', price: 3000, rarity: 'legend' },
+  // 트레일 (움직이면 뒤에 남는 빛)
+  { id: 'trail_sparkle', slot: 'trail', label: '반짝이 트레일', price: 1200, rarity: 'rare' },
+  { id: 'trail_bubble', slot: 'trail', label: '비눗방울 트레일', price: 1200, rarity: 'rare' },
+  { id: 'trail_heart', slot: 'trail', label: '하트 트레일', price: 1600, rarity: 'epic' },
+  { id: 'trail_fire', slot: 'trail', label: '불꽃 트레일', price: 2200, rarity: 'epic' },
+  { id: 'trail_rainbow', slot: 'trail', label: '무지개 트레일', price: 3500, rarity: 'legend' },
+  // 오라 (발밑에서 빛나는 고리)
+  { id: 'aura_ice', slot: 'aura', label: '얼음 오라', price: 2500, rarity: 'epic' },
+  { id: 'aura_love', slot: 'aura', label: '러블리 오라', price: 2500, rarity: 'epic' },
+  { id: 'aura_gold', slot: 'aura', label: '황금 오라', price: 4000, rarity: 'legend' },
 ];
 export const findAccessory = (id) => ACCESSORIES.find((a) => a.id === id) || null;
 
@@ -114,11 +180,13 @@ export const DEFAULT_APPEARANCE = Object.freeze({
   muscle: 0.3,
   weight: 0.35,
   height: 0.5,
-  skin: SKIN_COLORS[1],
+  skin: SKIN_COLORS[2],
   hair: 'short',
   hairColor: HAIR_COLORS[0],
   face: 'round',
   eyes: 'round',
+  eyeColor: '#2b2420',
+  cheeks: 'blush',
   brows: 'soft',
   nose: 'button',
   mouth: 'smile',
@@ -140,6 +208,8 @@ export const APPEARANCE_FIELDS = {
   hairColor: HAIR_COLORS,
   face: ids(FACE_SHAPES),
   eyes: ids(EYE_STYLES),
+  eyeColor: EYE_COLORS,
+  cheeks: ids(CHEEK_STYLES),
   brows: ids(BROW_STYLES),
   nose: ids(NOSE_STYLES),
   mouth: ids(MOUTH_STYLES),
@@ -164,9 +234,10 @@ const clamp01 = (n) => Math.min(1, Math.max(0, n));
 /**
  * 허용되지 않은 값은 기본값으로 대체한 새 객체를 반환
  * @param {object} input
- * @param {{ownedItems?: string[]}} opts 보유한 악세사리 id (없으면 악세사리는 모두 제거)
+ * @param {{ownedItems?: string[]|null}} opts 보유한 악세사리 id (빈 배열이면 악세사리 모두 제거, null 이면 확인 안 함)
  */
 export function sanitizeAppearance(input, { ownedItems = [] } = {}) {
+  // ownedItems === null → 보유 여부는 확인하지 않음 (DB 에서 읽을 때·외형 편집 화면. 서버가 접속 시 다시 확인)
   const src = input && typeof input === 'object' ? input : {};
   const legacy = !src.gender && typeof src.body === 'string' ? LEGACY_BODY[src.body] : null;
   const out = {};
@@ -186,7 +257,7 @@ export function sanitizeAppearance(input, { ownedItems = [] } = {}) {
   const acc = src.acc && typeof src.acc === 'object' ? src.acc : {};
   for (const slot of ACC_SLOTS) {
     const item = findAccessory(acc[slot]);
-    if (item && item.slot === slot && ownedItems.includes(item.id)) out.acc[slot] = item.id;
+    if (item && item.slot === slot && (ownedItems === null || ownedItems.includes(item.id))) out.acc[slot] = item.id;
   }
   return out;
 }

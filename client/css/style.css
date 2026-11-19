@@ -407,3 +407,112 @@ body.mobile .chat.expanded { background: rgba(20, 22, 28, .94); }
 .slider-row small { width: 34px; text-align: center; }
 .body-slider { flex: 1; accent-color: var(--ink); height: 28px; }
 .key-chip { min-width: 64px; font-weight: 900; }
+
+/* ── 코인 (HUD) ─────────────────── */
+.hud-quick { position: absolute; top: 62px; left: 14px; display: flex; gap: 6px; align-items: center; pointer-events: auto; }
+.hud-quick-btn {
+  font: inherit; font-weight: 700; font-size: 13px; color: #fff; cursor: pointer;
+  background: var(--hud-bg); border: 1px solid rgba(255,255,255,.18); border-radius: 999px; padding: 5px 10px;
+  display: flex; align-items: center; gap: 4px;
+}
+.hud-quick-btn:hover { background: rgba(28, 31, 38, 0.75); }
+.hud-quick-btn kbd { font: inherit; font-size: 10px; background: rgba(255,255,255,.2); border-radius: 4px; padding: 0 4px; }
+.hud-coins {
+  position: relative; pointer-events: auto;
+  display: flex; align-items: center; gap: 6px;
+  font: inherit; font-weight: 800; font-size: 15px; color: #fff;
+  background: var(--hud-bg); border: 1px solid rgba(255, 216, 74, 0.55);
+  border-radius: 999px; padding: 5px 12px 5px 10px; cursor: pointer;
+}
+.hud-coins:hover { background: rgba(28, 31, 38, 0.75); }
+.hud-coins-shop { font-size: 11px; font-weight: 700; color: #1d1d22; background: #ffd84a; border-radius: 999px; padding: 1px 7px; margin-left: 2px; }
+.hud-coins.bump { animation: coin-bump .35s ease; }
+@keyframes coin-bump { 40% { transform: scale(1.12); } }
+.coin-pop {
+  position: absolute; left: 100%; top: 2px; margin-left: 6px;
+  color: #ffd84a; font-weight: 900; text-shadow: 0 1px 2px rgba(0,0,0,.5);
+  animation: coin-pop .9s ease-out forwards; pointer-events: none;
+}
+@keyframes coin-pop { from { opacity: 1; transform: translateY(0); } to { opacity: 0; transform: translateY(-18px); } }
+body.mobile .hud-quick { top: 46px; left: 8px; }
+body.mobile .hud-coins { font-size: 13px; padding: 4px 10px; }
+body.mobile .hud-quick-btn span, body.mobile .hud-quick-btn kbd { display: none; }
+body.mobile.chat-mode .hud-quick { display: none; }
+
+/* ── 치장 상점 ─────────────────── */
+#shop { z-index: 40; }
+.shop-panel {
+  width: min(1080px, 96vw); height: min(720px, 94vh);
+  background: rgba(255, 255, 255, 0.97); border-radius: 22px;
+  border: 1px solid rgba(67, 80, 96, 0.16); box-shadow: 0 20px 55px rgba(35, 48, 63, 0.22);
+  display: flex; flex-direction: column; overflow: hidden;
+}
+.shop-head { display: flex; align-items: center; gap: 14px; padding: 14px 20px; border-bottom: 1px solid #e6ebf0; }
+.shop-head h2 { margin: 0; font-size: 20px; flex: 1; }
+.shop-coins { font-weight: 900; font-size: 18px; background: #fff6d6; border: 1px solid #f0d27a; border-radius: 999px; padding: 6px 14px; }
+.shop-body { flex: 1; display: flex; min-height: 0; }
+.shop-left { width: 340px; flex-shrink: 0; display: flex; flex-direction: column; border-right: 1px solid #e6ebf0; background: linear-gradient(180deg, #eef3f7, #f8f4ec); }
+.shop-preview { position: relative; flex: 1; min-height: 220px; }
+.shop-detail { padding: 14px 16px; border-top: 1px solid #e6ebf0; background: #fff; min-height: 108px; }
+.shop-detail-title { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; font-size: 16px; }
+.shop-badge { color: #fff; font-size: 11px; font-weight: 700; border-radius: 999px; padding: 2px 8px; margin-left: auto; }
+.shop-actions { display: flex; gap: 8px; }
+.shop-actions .btn { flex: 1; padding: 9px 10px; }
+.shop-actions .btn:disabled { opacity: .5; cursor: not-allowed; }
+.shop-hint { color: var(--ink-soft); font-size: 13px; }
+.shop-right { flex: 1; display: flex; flex-direction: column; min-width: 0; padding: 12px 16px; gap: 10px; }
+.shop-tabs { display: flex; flex-wrap: wrap; gap: 6px; }
+.shop-tab { font: inherit; font-size: 13px; font-weight: 700; border: 1px solid #cbd3dc; background: #fff; color: #344253; border-radius: 999px; padding: 5px 12px; cursor: pointer; }
+.shop-tab.active { background: #344557; border-color: #344557; color: #fff; }
+.shop-grid { flex: 1; overflow-y: auto; display: grid; grid-template-columns: repeat(auto-fill, minmax(118px, 1fr)); gap: 10px; align-content: start; padding: 2px; }
+.shop-card {
+  font: inherit; position: relative; cursor: pointer; text-align: center;
+  background: #fff; border: 2px solid #e2e7ed; border-radius: 14px; padding: 12px 6px 9px;
+  display: flex; flex-direction: column; align-items: center; gap: 3px;
+  transition: transform .08s, border-color .08s;
+}
+.shop-card::before { content: ''; position: absolute; left: 0; right: 0; top: 0; height: 4px; border-radius: 12px 12px 0 0; background: var(--rarity); }
+.shop-card:hover { transform: translateY(-2px); border-color: #b9c4cf; }
+.shop-card.selected { border-color: var(--rarity); box-shadow: 0 0 0 3px color-mix(in srgb, var(--rarity) 25%, transparent); }
+.shop-card.cant .shop-price { color: #b0b6bf; }
+.shop-card.worn::after { content: '착용'; position: absolute; top: 8px; right: 6px; font-size: 10px; font-weight: 800; color: #fff; background: var(--teal); border-radius: 999px; padding: 1px 6px; }
+.shop-icon { font-size: 34px; line-height: 1.1; }
+.shop-icon.small { font-size: 22px; }
+.shop-name { font-weight: 800; font-size: 13px; }
+.shop-rarity { font-size: 11px; font-weight: 700; color: var(--rarity); }
+.shop-price { font-size: 13px; font-weight: 800; color: #6a5300; }
+.shop-card.owned .shop-price { color: var(--teal); }
+.shop-empty { grid-column: 1 / -1; color: var(--ink-soft); padding: 30px 0; text-align: center; }
+.shop-earn { font-size: 12px; color: var(--ink-soft); background: #f3f6f9; border-radius: 10px; padding: 7px 10px; }
+.shop-msg { min-height: 18px; font-size: 13px; font-weight: 700; color: #344557; }
+@media (max-width: 760px) {
+  .shop-panel { height: 96vh; }
+  .shop-body { flex-direction: column; }
+  .shop-left { width: auto; flex-direction: row; border-right: 0; border-bottom: 1px solid #e6ebf0; }
+  .shop-preview { min-height: 170px; height: 170px; flex: 0 0 150px; }
+  .shop-detail { flex: 1; border-top: 0; }
+  .shop-grid { grid-template-columns: repeat(auto-fill, minmax(96px, 1fr)); }
+  .shop-icon { font-size: 28px; }
+}
+
+/* ── 랭킹 ─────────────────── */
+#ranking { z-index: 40; }
+.rank-panel {
+  width: min(760px, 94vw); max-height: 92vh; overflow: auto;
+  background: rgba(255,255,255,.97); border-radius: 22px; border: 1px solid rgba(67,80,96,.16);
+  box-shadow: 0 20px 55px rgba(35,48,63,.22); display: flex; flex-direction: column; gap: 10px; padding-bottom: 14px;
+}
+.rank-panel > .shop-earn, .rank-panel > .rank-me { margin: 0 18px; }
+.rank-day { font-size: 14px; color: var(--ink-soft); font-weight: 600; }
+.rank-cols { display: flex; gap: 14px; padding: 4px 18px; }
+.rank-col { flex: 1; background: #f6f8fa; border-radius: 14px; padding: 10px 12px; }
+.rank-col h3 { margin: 0 0 8px; font-size: 15px; }
+.rank-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+.rank-row { display: flex; align-items: center; gap: 8px; background: #fff; border-radius: 10px; padding: 6px 10px; font-size: 14px; }
+.rank-row.me { background: #fff6d6; outline: 2px solid #f0d27a; }
+.rank-no { width: 28px; text-align: center; font-weight: 900; }
+.rank-name { flex: 1; font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rank-val { font-weight: 800; color: #344557; }
+.rank-empty { color: var(--ink-soft); font-size: 13px; padding: 10px 4px; }
+.rank-me { font-weight: 800; color: #344557; }
+@media (max-width: 640px) { .rank-cols { flex-direction: column; } }

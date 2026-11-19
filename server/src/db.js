@@ -68,6 +68,22 @@ export const MIGRATIONS = [
   ALTER TABLE accounts ADD COLUMN coins INTEGER NOT NULL DEFAULT 0;
   ALTER TABLE accounts ADD COLUMN items TEXT NOT NULL DEFAULT '[]';
   `,
+  // v4: 코인 상점 오픈 — 기존 계정에 시작 코인 지급
+  `
+  UPDATE accounts SET coins = coins + 300;
+  `,
+  // v5: 오늘의 랭킹 (하루 단위 운동 시간 · 샌드백 명중 수)
+  `
+  CREATE TABLE IF NOT EXISTS daily_stats (
+    day          TEXT NOT NULL,
+    character_id INTEGER NOT NULL,
+    exercise_s   INTEGER NOT NULL DEFAULT 0,
+    bag_hits     INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (day, character_id)
+  );
+  CREATE INDEX IF NOT EXISTS idx_daily_ex ON daily_stats(day, exercise_s);
+  CREATE INDEX IF NOT EXISTS idx_daily_bag ON daily_stats(day, bag_hits);
+  `,
 ];
 
 /**

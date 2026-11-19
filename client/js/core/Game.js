@@ -14,6 +14,8 @@ import { CharacterModel } from '../character/CharacterModel.js';
 import { PlayerController } from '../character/PlayerController.js';
 import { HUD } from '../ui/HUD.js';
 import { Menu } from '../ui/Menu.js';
+import { Shop } from '../ui/Shop.js';
+import { RankingPanel } from '../ui/Ranking.js';
 import { ChatPanel } from '../ui/ChatPanel.js';
 import { TouchControls, isMobile } from '../ui/mobile.js';
 import { keyLabel } from '../ui/dom.js';
@@ -36,7 +38,10 @@ export class Game {
     container, uiRoot, profile, settings, creator, network = null, welcome = null, account = null, onChangeCharacter, onLogout,
   }) {
     this.container = container;
-    this.profile = profile;
+    // 서버가 보유 아이템 기준으로 확인한 외형을 우선 사용
+    this.profile = welcome?.self?.appearance ? { ...profile, appearance: welcome.self.appearance } : profile;
+    profile = this.profile;
+    this.wallet = welcome?.self?.wallet || { coins: 0, items: [] };
     this.settings = settings;
     this.creator = creator;
     this.network = network;
@@ -102,6 +107,9 @@ export class Game {
     this.menu = new Menu(uiRoot, {
       onResume: () => this._setControlsEnabled(true),
       onCustomize: () => this.openCustomizer(),
+      onShop: () => this.openShop(),
+      onBag: () => this.openShop(null, 'inventory'),
+      onRanking: () => this.openRanking(),
       onSettingsChange: (s) => this.applySettings(s),
       onWhisper: (nickname) => { this.menu.close(); this.chat.startWhisper(nickname); },
       onAdmin: (action, target, extra) => this._admin(action, target, extra),
@@ -112,6 +120,32 @@ export class Game {
       getAccount: () => this.account,
       getPlayers: () => this._playerList(),
     });
+
+    this.shop = new Shop(uiRoot, {
+      getWallet: () => this.wallet,
+      getAppearance: () => this.profile.appearance,
+      buy: (id) => this.network.buy(id),
+      sell: (id) => this.network.sell(id),
+      equip: (acc) => this._equip(acc),
+      online: () => !!this.network?.connected,
+      onClose: () => {
+        this.hud.setVisible(true);
+        this.touch?.setVisible(!this.chatMode);
+        this._setControlsEnabled(true);
+      },
+    });
+    this.hud.onCoinClick = () => this.openShop();
+    this.hud.onBagClick = () => this.openShop(null, 'inventory');
+    this.hud.onRankClick = () => this.openRanking();
+    this.ranking = new RankingPanel(uiRoot, {
+      fetch: () => this.network.request(EV.RANKING, null),
+      selfId: () => this.selfId,
+      onClose: () => {
+        this.touch?.setVisible(!this.chatMode);
+        this._setControlsEnabled(true);
+      },
+    });
+    this.hud.setCoins(this.network ? this.wallet.coins : null);
 
     if (this.mobile) {
       this.touch = new TouchControls(uiRoot, this.input, {
@@ -128,6 +162,11 @@ export class Game {
 
     // 키 바인딩 (공격 키는 설정에서 바꿀 수 있음 → applySettings 에서 등록)
     this.input.onPress('KeyE', () => this._interact());
+    this.input.onPress('KeyI', () => {
+      if (this.chat.isFocused()) return;
+      if (this.shop.isOpen()) { if (this.shop.mode === 'inventory') this.shop.close(); return; }
+      if (this.input.enabled) this.openShop(null, 'inventory');
+    });
     this.input.onPress('Escape', () => this._escape());
     this.input.onPress('Enter', (e) => this._openChat(e, ''));
     this.input.onPress('NumpadEnter', (e) => this._openChat(e, ''));
@@ -221,6 +260,50 @@ export class Game {
     this._resize();
   }
 
+  openShop(tab, mode = 'shop') {
+    if (this.shop.isOpen() || this.creator.isOpen() || this.ranking.isOpen()) return;
+    this.menu.close();
+    this._setControlsEnabled(false);
+    this.touch?.setVisible(false);
+    this.shop.open(tab, mode);
+  }
+
+  openRanking() {
+    if (!this.network || this.shop.isOpen() || this.creator.isOpen() || this.ranking.isOpen()) {
+      if (!this.network) this.hud.toast('랭킹은 서버에 접속했을 때 볼 수 있어요.');
+      return;
+    }
+    this.menu.close();
+    this._setControlsEnabled(false);
+    this.touch?.setVisible(false);
+    this.ranking.open().then(() => this._refreshBoard());
+  }
+
+  /** 라운지 벽 전광판 갱신 (30초마다) */
+  async _refreshBoard() {
+    if (!this.network?.connected) return;
+    try {
+      const data = await this.network.request(EV.RANKING, null);
+      this.gym.setRankingBoard(data);
+    } catch { /* 다음 주기에 다시 */ }
+  }
+
+  /** 치장 아이템 착용/해제 → 내 캐릭터 갱신 + 서버 저장 */
+  _equip(acc) {
+    const appearance = { ...this.profile.appearance, acc };
+    this.profile = { ...this.profile, appearance };
+    this.playerModel.setAppearance(appearance);
+    if (this.playerModel.nameTag) this.playerModel.nameTag.visible = this.settings.showNameTags;
+    this.network?.setAppearance(appearance);
+  }
+
+  _setWallet(w) {
+    if (!w) return;
+    this.wallet = { coins: Number(w.coins) || 0, items: Array.isArray(w.items) ? w.items : [] };
+    this.hud.setCoins(this.wallet.coins);
+    this.shop?.refresh();
+  }
+
   async openCustomizer() {
     this._setControlsEnabled(false);
     this.hud.setVisible(false);
@@ -255,7 +338,24 @@ export class Game {
       this.remotePlayers.remove(id);
       this._updateOnline();
     });
-    net.on(EV.PLAYER_APPEARANCE, ({ id, appearance }) => this.remotePlayers.setAppearance(id, appearance));
+    net.on(EV.PLAYER_APPEARANCE, ({ id, appearance }) => {
+      if (id === this.selfId) {
+        // 서버가 내 외형을 바꿈 (예: 판매한 아이템 자동 해제)
+        this.profile = { ...this.profile, appearance };
+        this.playerModel.setAppearance(appearance);
+        if (this.playerModel.nameTag) this.playerModel.nameTag.visible = this.settings.showNameTags;
+        this.shop.refresh();
+        return;
+      }
+      this.remotePlayers.setAppearance(id, appearance);
+    });
+    net.on(EV.WALLET, (w) => {
+      this._setWallet(w);
+      if (w.gained > 0) {
+        this.hud.coinPop(w.gained);
+        if (w.reason === 'admin') this.hud.toast(`관리자에게서 ${w.gained}코인을 받았어요! 🪙`);
+      }
+    });
     net.on(EV.CORRECT, ({ x, y, z }) => this.player.teleport(x, z, this.player.rotY, y));
     net.on(EV.CHAT, (msg) => {
       this.chat.addMessage(msg);
@@ -281,8 +381,12 @@ export class Game {
     net.on(EV.HIT, (h) => this._onHit(h));
 
     // 재접속 성공 → 전체 상태 다시 맞추기
+    clearInterval(this._boardTimer);
+    this._boardTimer = setInterval(() => this._refreshBoard(), 30000);
+    setTimeout(() => this._refreshBoard(), 1500);
     net.on('resync', (w) => {
       this.remotePlayers.reset(w.players);
+      this._setWallet(w.self?.wallet);
       this.chat.loadInitial(w.chat || []);
       const s = w.self;
       if (Math.hypot(s.x - this.player.position.x, s.z - this.player.position.z) > 2) this.player.teleport(s.x, s.z, s.r);
@@ -399,6 +503,14 @@ export class Game {
   }
 
   _escape() {
+    if (this.ranking.isOpen()) {
+      this.ranking.close();
+      return;
+    }
+    if (this.shop.isOpen()) {
+      this.shop.close();
+      return;
+    }
     if (this.creator.isOpen()) {
       if (this.creator.mode === 'edit') this.creator.close(null);
       return;
@@ -495,7 +607,7 @@ export class Game {
   }
 
   _zoneName(x, z) {
-    if (z > 4.5 && x > 8) return '휴식 공간';
+    if (z > 4.5 && x > 8) return '라운지';
     if (z > 10.8 && Math.abs(x) < 7) return '입구';
     if (x < -5 && z < -7) return '벤치프레스 구역';
     if (x < -5 && z < 1) return '프리웨이트 구역';

@@ -2,7 +2,7 @@
 import { el } from './dom.js';
 import { getCharacterPreview } from './CharacterPreview.js';
 import {
-  GENDERS, BODY_PRESETS, BODY_SLIDERS, SKIN_COLORS, HAIR_STYLES, HAIR_COLORS, FACE_SHAPES, EYE_STYLES, BROW_STYLES, NOSE_STYLES, MOUTH_STYLES, OUTFITS, CLOTH_COLORS, SHOES, SHOE_COLORS,
+  GENDERS, BODY_PRESETS, BODY_SLIDERS, SKIN_COLORS, HAIR_STYLES, HAIR_COLORS, FACE_SHAPES, EYE_STYLES, EYE_COLORS, CHEEK_STYLES, BROW_STYLES, NOSE_STYLES, MOUTH_STYLES, OUTFITS, CLOTH_COLORS, SHOES, SHOE_COLORS,
   DEFAULT_APPEARANCE, sanitizeAppearance, randomAppearance, validateNickname, NICKNAME_MAX,
 } from '../shared/appearance.js';
 
@@ -13,6 +13,8 @@ const SECTIONS = [
   { key: 'skin', title: '피부색', kind: 'colors', options: SKIN_COLORS },
   { key: 'face', title: '얼굴 형태', kind: 'chips', options: FACE_SHAPES },
   { key: 'eyes', title: '눈 모양', kind: 'chips', options: EYE_STYLES },
+  { key: 'eyeColor', title: '눈 색', kind: 'colors', options: EYE_COLORS },
+  { key: 'cheeks', title: '볼', kind: 'chips', options: CHEEK_STYLES },
   { key: 'brows', title: '눈썹', kind: 'chips', options: BROW_STYLES },
   { key: 'nose', title: '코 모양', kind: 'chips', options: NOSE_STYLES },
   { key: 'mouth', title: '입 모양', kind: 'chips', options: MOUTH_STYLES },
@@ -48,7 +50,7 @@ export class CharacterCreator {
   } = {}) {
     this.mode = mode;
     this._onSubmit = onSubmit;
-    this.appearance = sanitizeAppearance(profile?.appearance || DEFAULT_APPEARANCE);
+    this.appearance = sanitizeAppearance(profile?.appearance || DEFAULT_APPEARANCE, { ownedItems: null });
     this.nickInput.value = profile?.nickname || '';
     this.nickInput.disabled = mode === 'edit';
     this.errorEl.textContent = error;
@@ -154,7 +156,7 @@ export class CharacterCreator {
 
   /** 값 변경 → 미리보기 갱신 (슬라이더는 프레임당 한 번만 다시 만듦) */
   _setMany(values, fromSlider = false) {
-    this.appearance = sanitizeAppearance({ ...this.appearance, ...values });
+    this.appearance = sanitizeAppearance({ ...this.appearance, ...values }, { ownedItems: null });
     if (!fromSlider) this._refreshSelections();
     if (this._pending) return;
     this._pending = requestAnimationFrame(() => {
@@ -164,7 +166,7 @@ export class CharacterCreator {
   }
 
   _randomize() {
-    this.appearance = sanitizeAppearance(randomAppearance());
+    this.appearance = sanitizeAppearance({ ...randomAppearance(), acc: this.appearance.acc }, { ownedItems: null }); // 착용 중인 치장템은 유지
     this._refreshSelections();
     this.preview.setAppearance(this.appearance);
   }

@@ -1,8 +1,11 @@
 // Socket.IO 이벤트 처리 — 접속 인증(세션+캐릭터), 위치 동기화, 채팅, 전투, 관리자 기능
 import {
-  EV, AUTH_ERRORS, PROTOCOL_VERSION, SERVER_TICK_HZ, ATTACKS,
+  EV, AUTH_ERRORS, PROTOCOL_VERSION, SERVER_TICK_HZ, ATTACKS, ACTIONS,
 } from '../../../client/js/shared/protocol.js';
 import { sanitizeAppearance } from '../../../client/js/shared/appearance.js';
+import { ECONOMY } from '../../../client/js/shared/economy.js';
+import { exerciseSpots, PUNCHING_BAGS } from '../../../client/js/shared/gymLayout.js';
+import { findPunchingBagTarget } from '../../../client/js/world/bagCollision.js';
 import { PlayerRegistry } from '../game/PlayerRegistry.js';
 import { resolveAttack } from '../game/combat.js';
 import {
@@ -20,12 +23,45 @@ function authError(code) {
  * @param {{config:object, accounts:import('../services/AccountService.js').AccountService,
  *          characters:import('../services/CharacterService.js').CharacterService, chat:ChatService, log?:Function}} deps
  */
-export function attachGameHandlers(io, { config, accounts, characters, chat, log = console.log }) {
+export function attachGameHandlers(io, {
+  config, accounts, characters, chat, economy, stats, log = console.log,
+}) {
   const registry = new PlayerRegistry();
   const limiter = new RateLimiter(config.CHAT_RATE_MAX, config.CHAT_RATE_WINDOW_MS);
   const mutes = new Map(); // characterId → 해제 시각(ms)
 
   const sendSystem = (socket, text) => socket.emit(EV.CHAT, ChatService.system(text));
+  const SPOTS = exerciseSpots();
+  const BAGS = PUNCHING_BAGS.map((b) => ({ worldX: b.x, worldZ: b.z }));
+
+  /** 같은 계정으로 접속한 모든 창에 지갑 상태 전송 */
+  const sendWallet = (accountId, extra = {}) => {
+    const view = economy.view(accountId);
+    for (const p of registry.listByAccount(accountId)) io.to(p.socketId).emit(EV.WALLET, { ...view, ...extra });
+  };
+
+  /** 코인 지급 (검증된 행동만) → 받은 사람에게 알림 */
+  const reward = (p, amount, reason) => {
+    const got = economy.earn(p.accountId, amount);
+    if (got > 0) { p.capNotified = false; sendWallet(p.accountId, { gained: got, reason }); }
+    else if (!p.capNotified) {
+      p.capNotified = true;
+      const s = io.sockets.sockets.get(p.socketId);
+      if (s) sendSystem(s, `이번 시간에 벌 수 있는 코인(${ECONOMY.HOURLY_CAP})을 모두 벌었어요. 잠시 쉬었다 오세요!`);
+    }
+  };
+
+  /** 보유하지 않게 된 아이템은 착용 해제 (판매 후) */
+  const refreshOwnedAppearance = (accountId) => {
+    const owned = economy.items(accountId);
+    for (const p of registry.listByAccount(accountId)) {
+      const clean = sanitizeAppearance(p.appearance, { ownedItems: owned });
+      if (JSON.stringify(clean.acc) === JSON.stringify(p.appearance.acc)) continue;
+      p.appearance = clean;
+      io.emit(EV.PLAYER_APPEARANCE, { id: p.id, appearance: clean });
+      characters.updateAppearance(p.id, clean, owned).catch((err) => log('[db] 외형 저장 실패', err));
+    }
+  };
   const broadcastSystem = (text) => io.emit(EV.CHAT, ChatService.system(text));
 
   /** 플레이어 연결 강제 종료 */
@@ -56,6 +92,8 @@ export function attachGameHandlers(io, { config, accounts, characters, chat, log
 
       socket.data.account = account;
       socket.data.user = character;
+      socket.data.wallet = await economy.open(account.id);
+      socket.data.walletOpen = true;
       try {
         socket.data.history = await chat.initialHistory(character.id);
       } catch (err) {
@@ -70,7 +108,9 @@ export function attachGameHandlers(io, { config, accounts, characters, chat, log
   });
 
   // ── 관리자 기능 (채팅 명령어와 관리자 패널이 함께 사용) ──
-  async function adminAction(admin, { action, target, reason, minutes, text }) {
+  async function adminAction(admin, {
+    action, target, reason, minutes, text, amount,
+  }) {
     if (!admin.admin) return { ok: false, message: '관리자 권한이 없습니다.' };
     const online = target ? registry.getByNickname(target) : null;
     if (online?.admin && online !== admin && ['kick', 'ban', 'mute', 'delchar'].includes(action)) {
@@ -116,6 +156,15 @@ export function attachGameHandlers(io, { config, accounts, characters, chat, log
         mutes.delete(c.id);
         return { ok: true, message: `${c.nickname}님의 채팅 금지를 해제했습니다.` };
       }
+      case 'give': {
+        const c = online ? { accountId: online.accountId, nickname: online.nickname } : await characters.findByNickname(target);
+        if (!c?.accountId) return { ok: false, message: `'${target}' 캐릭터(또는 계정)를 찾을 수 없습니다.` };
+        const n = Math.max(-1e6, Math.min(1e6, Math.trunc(Number(amount) || 0)));
+        if (!n) return { ok: false, message: '지급할 코인 수를 입력하세요.' };
+        const coins = await economy.adminGive(c.accountId, n);
+        sendWallet(c.accountId, n > 0 ? { gained: n, reason: 'admin' } : {});
+        return { ok: true, message: `${c.nickname}님에게 ${n > 0 ? `${n}코인 지급` : `${-n}코인 회수`} (현재 ${coins}코인)` };
+      }
       case 'delchar': {
         const c = online || await characters.findByNickname(target);
         if (!c) return { ok: false, message: `'${target}' 캐릭터를 찾을 수 없습니다.` };
@@ -151,9 +200,14 @@ export function attachGameHandlers(io, { config, accounts, characters, chat, log
       }
     }
 
-    const player = registry.add(socket.id, user, Date.now(), {
+    const wallet = socket.data.wallet;
+    // 저장된 외형 중 보유하지 않은 아이템은 벗김
+    const startUser = { ...user, appearance: sanitizeAppearance(user.appearance, { ownedItems: wallet.items }) };
+    const player = registry.add(socket.id, startUser, Date.now(), {
       accountId: account.id, username: account.username, admin: account.isAdmin,
     });
+    player.exAcc = 0;
+    player.bagCoinAt = 0;
     log(`[join] ${user.nickname} (#${user.id}, ${account.username}${account.isAdmin ? ', 관리자' : ''}) — 현재 ${registry.count}명`);
 
     socket.emit(EV.WELCOME, {
@@ -164,6 +218,8 @@ export function attachGameHandlers(io, { config, accounts, characters, chat, log
         admin: account.isAdmin,
         username: account.username,
         x: player.x, z: player.z, r: player.r,
+        appearance: player.appearance,
+        wallet,
       },
       players: registry.list().filter((p) => p !== player).map(PlayerRegistry.info),
       chat: socket.data.history,
@@ -195,16 +251,47 @@ export function attachGameHandlers(io, { config, accounts, characters, chat, log
       for (const h of res.hits) {
         io.emit(EV.HIT, { from: p.id, to: h.target.id, type, kx: h.kx, kz: h.kz, down: h.down });
       }
+      // 샌드백 명중 → 코인 (서버가 아는 위치·방향으로 다시 판정)
+      const reach = type === 'kick' ? 1.05 : 0.9;
+      const bag = findPunchingBagTarget(BAGS, {
+        hitX: p.x + Math.sin(p.r) * reach, hitZ: p.z + Math.cos(p.r) * reach, fromX: p.x, fromZ: p.z, rotY: p.r,
+      });
+      const now = Date.now();
+      if (bag) stats.addBagHit(p.id);
+      if (bag && now - p.bagCoinAt >= ECONOMY.BAG_COIN_COOLDOWN_MS) {
+        p.bagCoinAt = now;
+        reward(p, ECONOMY.BAG_COINS, 'bag');
+      }
     });
 
     // ── 외형 변경 ─────────────────────────────────────
     socket.on(EV.SET_APPEARANCE, (appearance) => {
       const p = registry.get(socket.id);
       if (!p) return;
-      p.appearance = sanitizeAppearance(appearance, { ownedItems: account.items || [] });
+      const owned = economy.items(account.id);
+      p.appearance = sanitizeAppearance(appearance, { ownedItems: owned });
       socket.broadcast.emit(EV.PLAYER_APPEARANCE, { id: p.id, appearance: p.appearance });
-      characters.updateAppearance(p.id, p.appearance, account.items || []).catch((err) => log('[db] 외형 저장 실패', err));
+      characters.updateAppearance(p.id, p.appearance, owned).catch((err) => log('[db] 외형 저장 실패', err));
     });
+
+    // ── 상점 (구매/판매) ──────────────────────────────
+    const shop = (event, fn) => socket.on(event, (itemId, ack) => {
+      if (typeof ack !== 'function') return;
+      if (typeof itemId !== 'string' || itemId.length > 40) { ack({ ok: false, message: '잘못된 요청입니다.' }); return; }
+      fn(itemId).then((r) => {
+        ack(r);
+        if (r.ok) {
+          sendWallet(account.id);
+          if (event === EV.SHOP_SELL) refreshOwnedAppearance(account.id);
+          log(`[shop] ${account.username} ${event === EV.SHOP_BUY ? '구매' : '판매'} ${itemId} → ${r.coins}코인`);
+        }
+      }, (err) => {
+        log(`[shop] 오류`, err);
+        ack({ ok: false, message: '처리 중 오류가 발생했습니다.' });
+      });
+    });
+    shop(EV.SHOP_BUY, (id) => economy.buy(account.id, id));
+    shop(EV.SHOP_SELL, (id) => economy.sell(account.id, id));
 
     // ── 채팅 ─────────────────────────────────────────
     socket.on(EV.CHAT_SEND, (raw) => {
@@ -275,6 +362,7 @@ export function attachGameHandlers(io, { config, accounts, characters, chat, log
       fn(req).then(ack, (err) => { log(`[${event}] 오류`, err); ack(fallback); });
     });
     query(EV.CHAT_HISTORY, (req) => chat.globalHistory(Number(req?.beforeId)));
+    query(EV.RANKING, async () => ({ ...(await stats.ranking(10)), me: { id: user.id, ...(await stats.mine(user.id)) } }), { day: '', exercise: [], bag: [] });
     query(EV.CHAT_PARTNERS, () => chat.whisperPartners(user.id));
     query(EV.CHAT_WHISPERS, async (req) => {
       const other = await characters.findByNickname(req?.nickname);
@@ -289,6 +377,7 @@ export function attachGameHandlers(io, { config, accounts, characters, chat, log
         reason: typeof req.reason === 'string' ? req.reason.slice(0, 100) : null,
         minutes: req.minutes,
         text: typeof req.text === 'string' ? req.text : null,
+        amount: req.amount,
       });
       if (r.ok) log(`[admin] ${p.nickname}: ${req.action} ${req.target || ''}`);
       return r;
@@ -296,6 +385,10 @@ export function attachGameHandlers(io, { config, accounts, characters, chat, log
 
     // ── 퇴장 ─────────────────────────────────────────
     socket.on('disconnect', (reason) => {
+      if (socket.data.walletOpen) {
+        socket.data.walletOpen = false;
+        economy.close(account.id).catch((err) => log('[db] 코인 저장 실패', err));
+      }
       const p = registry.remove(socket.id);
       if (!p) return; // 중복 접속으로 교체된 경우
       characters.saveLastSeen(p.id, { x: p.x, z: p.z, r: p.r }).catch((err) => log('[db] 위치 저장 실패', err));
@@ -312,6 +405,26 @@ export function attachGameHandlers(io, { config, accounts, characters, chat, log
     if (packet.length) io.emit(EV.STATE, { t: Date.now(), p: packet });
   }, 1000 / SERVER_TICK_HZ);
 
+  // ── 운동 코인: 1초마다 "기구 자리에서 그 기구 운동 중" 인 사람만 적립 ──
+  const exerciseTick = setInterval(() => {
+    for (const p of registry.list()) {
+      const action = ACTIONS[p.a] || 'idle';
+      const ok = action.startsWith('ex_') && SPOTS.some((s) => s.exercise === action
+        && Math.hypot(s.x - p.x, s.z - p.z) <= ECONOMY.SPOT_TOLERANCE);
+      if (!ok) { p.exAcc = 0; continue; }
+      stats.addExercise(p.id, 1);
+      p.exAcc += 1;
+      if (p.exAcc >= ECONOMY.EXERCISE_SECONDS_PER_COIN) {
+        p.exAcc = 0;
+        reward(p, 1, 'exercise');
+      }
+    }
+  }, 1000);
+  const flushTimer = setInterval(() => {
+    economy.flushAll();
+    stats.flush().catch((err) => log('[db] 랭킹 저장 실패', err));
+  }, ECONOMY.FLUSH_MS);
+
   return {
     registry,
     /** REST API 에서 계정 차단/삭제 시 접속 중인 캐릭터를 내보내기 위해 사용 */
@@ -324,6 +437,10 @@ export function attachGameHandlers(io, { config, accounts, characters, chat, log
     },
     async stop() {
       clearInterval(tick);
+      clearInterval(exerciseTick);
+      clearInterval(flushTimer);
+      await economy.flushAll();
+      await stats.flush().catch(() => {});
       await Promise.allSettled(registry.list().map((p) => characters.saveLastSeen(p.id, { x: p.x, z: p.z, r: p.r })));
     },
   };

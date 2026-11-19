@@ -197,3 +197,43 @@ test('물리: 높이 있는 장애물 — 낮은 건 올라서고/넘고, 높은
   w.resolveCircle(d, 0.35, 0);
   assert.equal(d.x, -4.5);
 });
+
+test('상점 카탈로그: id 중복 없음, 슬롯 유효, 보유 확인 / 확인 생략(null)', async () => {
+  const { ACCESSORIES, ACC_SLOTS, sanitizeAppearance } = await import('../client/js/shared/appearance.js');
+  const ids = ACCESSORIES.map((a) => a.id);
+  assert.equal(new Set(ids).size, ids.length);
+  for (const a of ACCESSORIES) {
+    assert.ok(ACC_SLOTS.includes(a.slot), a.id);
+    assert.ok(a.price > 0, a.id);
+  }
+  const look = { acc: { hat: 'crown', trail: 'trail_fire', back: 'cap' } };
+  assert.deepEqual(sanitizeAppearance(look, { ownedItems: ['crown'] }).acc, { hat: 'crown' });
+  assert.deepEqual(sanitizeAppearance(look, { ownedItems: null }).acc, { hat: 'crown', trail: 'trail_fire' }); // 슬롯이 틀린 건 제거
+});
+
+test('운동 자리(서버 코인 판정용) = 기구 배치 + 기구별 자리', async () => {
+  const { exerciseSpots, EQUIPMENT_LAYOUT } = await import('../client/js/shared/gymLayout.js');
+  const spots = exerciseSpots();
+  assert.equal(spots.length, EQUIPMENT_LAYOUT.length);
+  const lat = spots.find((s) => s.id === 'latpull-1'); // rotY = -90°: 로컬 z 0.32 → 월드 x -0.32
+  assert.ok(Math.abs(lat.x - (17 - 0.32)) < 1e-9 && Math.abs(lat.z - -3) < 1e-9);
+  assert.equal(lat.exercise, 'ex_lat');
+});
+
+test('옷 무늬 다각형 삼각분할', async () => {
+  const { triangulate, starPoly, heartPoly } = await import('../client/js/character/polygons.js');
+  const area = (poly, tris) => {
+    let s = 0;
+    for (let i = 0; i < tris.length; i += 3) {
+      const [a, b, c] = [poly[tris[i]], poly[tris[i + 1]], poly[tris[i + 2]]];
+      s += ((b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0])) / 2;
+    }
+    return s;
+  };
+  const polyArea = (p) => Math.abs(p.reduce((s, [x1, y1], i) => { const [x2, y2] = p[(i + 1) % p.length]; return s + x1 * y2 - x2 * y1; }, 0) / 2);
+  for (const poly of [starPoly(5, 1, 0.45), heartPoly(24), [[0.15, 1], [-0.5, -0.05], [-0.02, -0.05], [-0.25, -1], [0.5, 0.15], [0.03, 0.15], [0.35, 1]]]) {
+    const tris = triangulate(poly);
+    assert.equal(tris.length, (poly.length - 2) * 3);
+    assert.ok(Math.abs(area(poly, tris) - polyArea(poly)) < 1e-9); // 전부 같은 방향(앞면), 빈틈/겹침 없음
+  }
+});

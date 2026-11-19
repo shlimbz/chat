@@ -62,7 +62,7 @@ export class NetworkClient {
       this.socket = socket;
 
       // 서버 이벤트를 등록된 핸들러로 전달
-      for (const ev of [EV.PLAYER_JOIN, EV.PLAYER_LEAVE, EV.PLAYER_APPEARANCE, EV.STATE, EV.CORRECT, EV.CHAT, EV.ATTACK_FX, EV.HIT]) {
+      for (const ev of [EV.PLAYER_JOIN, EV.PLAYER_LEAVE, EV.PLAYER_APPEARANCE, EV.STATE, EV.CORRECT, EV.CHAT, EV.ATTACK_FX, EV.HIT, EV.WALLET]) {
         socket.on(ev, (data) => this._emitLocal(ev, data));
       }
 
@@ -138,6 +138,15 @@ export class NetworkClient {
     if (!this.connected) return false;
     this.socket.emit(EV.CHAT_SEND, text);
     return true;
+  }
+
+  /** 상점: 구매/판매 → { ok, message, coins, items } */
+  buy(itemId) {
+    return this.request(EV.SHOP_BUY, itemId);
+  }
+
+  sell(itemId) {
+    return this.request(EV.SHOP_SELL, itemId);
   }
 
   setAppearance(appearance) {

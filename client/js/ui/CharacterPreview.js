@@ -44,6 +44,7 @@ class CharacterPreview {
     scene.add(base);
 
     this.model = new CharacterModel(DEFAULT_APPEARANCE);
+    this.model.fxPreview = true; // 제자리에서도 트레일이 보이게
     this.model.root.rotation.y = 0.35;
     scene.add(this.model.root);
 

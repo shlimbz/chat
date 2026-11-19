@@ -28,14 +28,14 @@ export function loadProfile() {
   const nick = validateNickname(data.nickname);
   return {
     nickname: nick.ok ? nick.value : '',
-    appearance: sanitizeAppearance(data.appearance),
+    appearance: sanitizeAppearance(data.appearance, { ownedItems: null }),
   };
 }
 
 export function saveProfile(profile) {
   return write(CONFIG.STORAGE_KEY_PROFILE, {
     nickname: profile.nickname,
-    appearance: sanitizeAppearance(profile.appearance),
+    appearance: sanitizeAppearance(profile.appearance, { ownedItems: null }),
   });
 }
 
@@ -62,7 +62,7 @@ export const DEFAULT_SETTINGS = Object.freeze({
 
 // 공격 키로 쓸 수 없는 키 (이동·점프·채팅·메뉴 등)
 export const RESERVED_KEYS = new Set(['KeyW', 'KeyA', 'KeyS', 'KeyD', 'KeyE', 'Space', 'Enter', 'NumpadEnter', 'Escape', 'Slash',
-  'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'ShiftLeft', 'ShiftRight', 'Tab', 'MetaLeft', 'MetaRight']);
+  'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'ShiftLeft', 'ShiftRight', 'Tab', 'MetaLeft', 'MetaRight', 'KeyI']);
 
 export function loadSettings() {
   const data = read(CONFIG.STORAGE_KEY_SETTINGS) || {};

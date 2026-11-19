@@ -12,13 +12,31 @@ import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { normalizeForMerge } from '../core/geometryUtils.js';
 import {
-  buildShell, facePlacement, hairline, headHalfWidth, surfaceDist,
+  buildShell, facePlacement, hairline, headHalfWidth, surfaceDist, outsideFace,
 } from './headShape.js';
+import {
+  addHat, addEyewear, addEarItem, addNeckItem, addPrint, addBackItem, shoeOverride, addShoeExtras, hatFlattensHair,
+} from './accessoryParts.js';
+import { CosmeticFx } from './CosmeticFx.js';
+import * as G from './prim.js';
+import {
+  makeTorsoShape, torsoPart, tubePart, hemRadius, vertexNormals,
+} from './bodyMesh.js';
 import {
   DEFAULT_APPEARANCE, DEFAULT_BODY_STATS, findOutfit, sanitizeAppearance, sanitizeBodyStats,
 } from '../shared/appearance.js';
 
 const TAU = Math.PI * 2;
+
+/** 색을 밝게(+)/어둡게(-) */
+function shade(hex, amt) {
+  const n = Number.parseInt(String(hex).replace('#', ''), 16) || 0;
+  const f = (v) => Math.round(amt < 0 ? v * (1 + amt) : v + (255 - v) * amt);
+  const r = f((n >> 16) & 255);
+  const g2 = f((n >> 8) & 255);
+  const bl = f(n & 255);
+  return `#${((r << 16) | (g2 << 8) | bl).toString(16).padStart(6, '0')}`;
+}
 const HIP_Y = 0.44; // 골반(다리 관절) 높이
 const THIGH = 0.2; // 골반 → 무릎
 const NECK_Y = 0.47; // 골반 기준 머리 관절 높이
@@ -129,7 +147,7 @@ class SkinBuilder {
   add(geo, color, bone, t = {}) {
     if (this.debug) {
       this.debug.push({
-        type: geo.type || geo.constructor.name, params: geo.parameters || geo.__args, raw: geo.__raw, color, bone: bone.name, t: { ...t, quat: t.quat ? t.quat.toArray?.() : undefined },
+        type: geo.type || geo.constructor.name, params: geo.parameters || geo.__args, raw: geo.__raw, color, tag: this.tag || null, bone: bone.name, t: { ...t, quat: t.quat ? t.quat.toArray?.() : undefined },
       });
     }
     const g = normalizeForMerge(geo, color);
@@ -146,6 +164,53 @@ class SkinBuilder {
     g.setAttribute('skinIndex', new THREE.BufferAttribute(si, 4));
     g.setAttribute('skinWeight', new THREE.BufferAttribute(sw, 4));
     this.list.push(g);
+  }
+
+  /**
+   * 여러 관절에 나눠 붙는 매끈한 파츠 (bodyMesh.js 결과)
+   * @param {{pos:number[], idx:number[], wts:{a:string,b:string,w:number}[], tcol:string[]}} part 골반 기준 좌표
+   * @param {number} yOffset 골반 높이 (모델 좌표로 옮김)
+   */
+  addSkinned(part, yOffset) {
+    const byName = this.boneByName;
+    const nor = vertexNormals(part.pos, part.idx);
+    const n = part.idx.length;
+    const P = new Float32Array(n * 3);
+    const N = new Float32Array(n * 3);
+    const Cc = new Float32Array(n * 3);
+    const SI = new Uint16Array(n * 4);
+    const SW = new Float32Array(n * 4);
+    const col = new THREE.Color();
+    for (let k = 0; k < n; k++) {
+      const v = part.idx[k];
+      P[k * 3] = part.pos[v * 3];
+      P[k * 3 + 1] = part.pos[v * 3 + 1] + yOffset;
+      P[k * 3 + 2] = part.pos[v * 3 + 2];
+      N[k * 3] = nor[v * 3]; N[k * 3 + 1] = nor[v * 3 + 1]; N[k * 3 + 2] = nor[v * 3 + 2];
+      if (k % 3 === 0) col.set(part.tcol[k / 3]);
+      Cc[k * 3] = col.r; Cc[k * 3 + 1] = col.g; Cc[k * 3 + 2] = col.b;
+      const w = part.wts[v];
+      SI[k * 4] = byName[w.a].userData.index;
+      SI[k * 4 + 1] = byName[w.b].userData.index;
+      SW[k * 4] = 1 - w.w;
+      SW[k * 4 + 1] = w.w;
+    }
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.BufferAttribute(P, 3));
+    g.setAttribute('normal', new THREE.BufferAttribute(N, 3));
+    g.setAttribute('color', new THREE.BufferAttribute(Cc, 3));
+    g.setAttribute('skinIndex', new THREE.BufferAttribute(SI, 4));
+    g.setAttribute('skinWeight', new THREE.BufferAttribute(SW, 4));
+    this.list.push(g);
+    if (this.debug) {
+      this.debug.push({
+        type: 'Skinned', color: '#000000', bone: 'root',
+        skin: {
+          p: Array.from(P), tc: part.tcol, si: Array.from(SI), sw: Array.from(SW),
+        },
+        t: {},
+      });
+    }
   }
 
   build() {
@@ -390,6 +455,7 @@ export class CharacterModel {
     const p = this.parts;
     if (!p) return;
     this.time += dt;
+    this.fx?.update(dt, speed > 0.6 || airborne, this.fxPreview === true);
 
     const ex = this.exercise;
     if (ex === 'ex_tread') { speed = 5.2; airborne = false; }
@@ -416,7 +482,25 @@ export class CharacterModel {
     this._updateBubble(dt);
   }
 
+  /** 트레일/오라: 아이템이 바뀔 때만 다시 만듦 */
+  _syncFx() {
+    const acc = this.appearance.acc || {};
+    const key = `${acc.trail || ''}|${acc.aura || ''}`;
+    if (this.fx?.key === key) return;
+    this.fx?.dispose();
+    this.fx = acc.trail || acc.aura ? new CosmeticFx(acc.trail, acc.aura, this.root) : null;
+    if (this.fx && this._fxEnabled === false) this.fx.setEnabled(false);
+  }
+
+  /** 저사양 설정: 다른 사람의 트레일/오라 끄기 */
+  setFxEnabled(v) {
+    this._fxEnabled = v;
+    this.fx?.setEnabled(v);
+  }
+
   dispose() {
+    this.fx?.dispose();
+    this.fx = null;
     this._disposeMesh();
     this._clearBubble();
     if (this.nameTag) {
@@ -460,7 +544,7 @@ export class CharacterModel {
     p.kneeR.rotation.x = mix(kneeAmt * (0.5 + 0.5 * Math.sin(ph - Math.PI / 2)), 0.55);
     p.armL.rotation.x = mix(s * swing * 1.1, -0.35);
     p.armR.rotation.x = mix(-s * swing * 1.1, -0.35);
-    const armOut = mix(0.28 - 0.1 * m + Math.sin(this.time * 1.8) * 0.03 * (1 - m), 2.2);
+    const armOut = mix((this.armOut0 ?? 0.28) - 0.06 * m + Math.sin(this.time * 1.8) * 0.02 * (1 - m), 2.2);
     p.armL.rotation.z = -armOut;
     p.armR.rotation.z = armOut;
     const elbow = mix(-(0.15 + 0.35 * m + 1.1 * r), -0.35);
@@ -493,7 +577,9 @@ export class CharacterModel {
       const a = side < 0 ? p.armL : p.armR;
       const e = side < 0 ? p.elbowL : p.elbowR;
       a.rotation.x = lerp(a.rotation.x, x, w);
-      a.rotation.z = lerp(a.rotation.z, side * z, w);
+      // 팔을 몸 쪽으로 내리는 자세라도 몸통을 파고들지 않을 만큼은 벌림
+      const minOut = (this.armOut0 ?? 0) * Math.max(0, 1 - Math.abs(x) / 1.3);
+      a.rotation.z = lerp(a.rotation.z, side * Math.max(z, minOut), w);
       e.rotation.x = lerp(e.rotation.x, elbowX, w);
     };
     switch (this.exercise) {
@@ -692,21 +778,21 @@ export class CharacterModel {
       gold: '#e8b923',
     };
 
-    // 체형 수치 (성별 + 근육량 + 몸무게)
-    // 슬라이더 끝값이 캐릭터 실루엣에서 분명히 구분되도록 폭·둘레 차이를 키우되,
-    // 머리/팔다리 관절 비율은 유지해 의상이나 헤어와 불필요하게 충돌하지 않게 합니다.
+    // 체형 수치 (성별 + 근육량 + 몸무게) — 동물의숲처럼 둥글고 귀여운 범위 안에서 변화
     const heightScale = (female ? 0.96 : 1) * (0.94 + a.height * 0.12);
-    // 근육량: 어깨·팔·가슴이 커지고 허리는 살짝 좁아짐 (역삼각형)
-    // 몸무게: 배·허리·허벅지·볼살이 커짐 (둥근 실루엣)
-    const sw = (female ? 0.9 : 1.0) * (0.84 + mus * 0.42 + wt * 0.1 + st.shoulders * 0.1 + st.back * 0.08);
-    const hw = (female ? 1.04 : 0.94) * (0.86 + wt * 0.46 + mus * 0.04);
-    const limb = (female ? 0.92 : 1.0) * (0.88 + wt * 0.3 + mus * 0.12);
-    const armR0 = 0.05 * limb * (1 + mus * 0.7 + st.arms * 0.28);
-    const legR0 = 0.074 * limb * (1 + wt * 0.22 + mus * 0.2 + st.legs * 0.25);
-    const girthX = sw * (1 + wt * 0.22);
-    const girthZ = 0.74 + wt * 0.52 + mus * 0.1;
-    const waist = 1 - mus * 0.14 + wt * 0.12; // 하의(허리) 쪽 폭 배율
+    // 근육량: 어깨·팔이 굵어지고 위가 넓은 실루엣 / 몸무게: 배·허리·허벅지·볼살이 둥글게
+    const sw = (female ? 0.92 : 1.0) * (0.88 + mus * 0.34 + wt * 0.08 + st.shoulders * 0.08 + st.back * 0.06);
+    const hw = (female ? 1.04 : 0.96) * (0.9 + wt * 0.34);
+    const limb = 0.9 + wt * 0.26 + mus * 0.1;
+    const armR0 = 0.045 * limb * (1 + mus * 0.5 + st.arms * 0.25);
+    const legR0 = 0.064 * limb * (1 + wt * 0.2 + mus * 0.15 + st.legs * 0.2);
+    const girthX = sw * (1 + wt * 0.2);
+    const girthZ = 0.78 + wt * 0.42 + mus * 0.08;
+    const waist = 1 - mus * 0.12 + wt * 0.08; // 아래쪽(골반) 폭 배율
     const cheek = 1 + wt * 0.14;
+    const belly = Math.max(0, wt - 0.25) / 0.75;
+    const bust = female ? 0.55 + wt * 0.25 : 0;
+    const pecs = female ? 0 : Math.min(1.3, Math.max(0, mus - 0.3) / 0.7 + st.chest * 0.5);
 
     // ── 관절(Bone) 만들기 (기본자세 = 모든 회전 0) ──
     const bones = [];
@@ -729,7 +815,11 @@ export class CharacterModel {
     const torso = bone('torso', hips);
     const chest = bone('chest', torso);
     const head = bone('head', torso, 0, NECK_Y, 0);
-    const shoulderX = 0.2 * sw + 0.035;
+    // 어깨 위치는 몸통 폭에 맞춤 (몸통이 넓어지면 팔도 바깥으로)
+    const shapeEarly = makeTorsoShape({ girthX, girthZ, waist, belly, bust, pecs });
+    let torsoMaxX = 0;
+    for (let y = 0.05; y <= SHOULDER_Y; y += 0.01) torsoMaxX = Math.max(torsoMaxX, shapeEarly.rx(y));
+    const shoulderX = torsoMaxX + armR0 * 1.1; // 어깨 공이 몸통 옆면에 딱 붙는 위치
     const armL = bone('armL', torso, -shoulderX, SHOULDER_Y, 0);
     const elbowL = bone('elbowL', armL, 0, -UPPER_ARM, 0);
     const armR = bone('armR', torso, shoulderX, SHOULDER_Y, 0);
@@ -738,59 +828,93 @@ export class CharacterModel {
 
     const debug = typeof globalThis !== 'undefined' && globalThis.__RECORD_PARTS;
     const b = new SkinBuilder(debug);
+    b.boneByName = Object.fromEntries(bones.map((x) => [x.name, x]));
 
-    // ── 다리 (허벅지 + 정강이·신발) ──
+    // ── 몸통: 표면 하나 (상의/하의는 색 영역) → 배·가슴이 옷을 뚫고 나올 수 없음 ──
+    const shape = makeTorsoShape({
+      girthX, girthZ, waist, belly, bust, pecs,
+    });
+    const WAIST_Y = 0.13;
+    b.addSkinned(torsoPart(shape, {
+      waistY: WAIST_Y,
+      top: C.top,
+      bottom: C.bottom,
+      hem: shade(C.top, -0.12), // 상의 밑단
+      collarY: a.outfit === 'tracksuit' ? 0.445 : null,
+      collar: C.white,
+    }), HIP_Y);
+    if (O.hood) {
+      const [hx, hy, hz] = shape.outside(0.42, Math.PI, 0.035);
+      b.add(G.sphere(0.15, 14, 10), C.top, chest, { x: hx, y: hy, z: hz, sx: 1.3, sy: 0.55, sz: 0.55 });
+    }
+
+    // ── 다리: 허벅지~발목 관 하나, 무릎에서 부드럽게 굽음. 반바지는 같은 관의 색 + 바짓단 ──
     for (const [leg, knee, side] of [[legL, kneeL, -1], [legR, kneeR, 1]]) {
-      const legColor = O.longPants ? C.bottom : C.skin;
-      b.add(new THREE.CapsuleGeometry(legR0 * 1.04, 0.11, 4, 12), O.longPants ? C.bottom : C.bottom, leg, { y: -0.1 });
-      b.add(new THREE.CapsuleGeometry(legR0, 0.08, 4, 12), legColor, knee, { y: -0.08 });
-      this._addShoe(b, knee, a.shoes, C, legR0);
-      void side;
+      const len = THIGH + 0.14;
+      const base = (sv) => legR0 * (1 - 0.18 * (sv / len));
+      const shortsEdge = 0.11;
+      b.addSkinned(tubePart({
+        pivot: [side * legX, -0.01, 0],
+        len,
+        joint: THIGH,
+        bones: [leg.name, knee.name],
+        radius: O.longPants ? (sv) => base(sv) * 1.06 : hemRadius(base, shortsEdge, 1.16),
+        paint: (sv) => (O.longPants || sv < shortsEdge ? C.bottom : C.skin),
+      }), HIP_Y);
+      this._addShoe(b, knee, a.shoes, C, legR0, shoeOverride(a.acc.feet));
     }
-    // ── 몸통 (달걀형): 아래쪽(하의)은 골반에, 위쪽(상의)은 가슴에 ──
-    const tr = 0.25;
-    const tS = { sx: girthX, sy: 1.1, sz: girthZ, y: 0.22 };
-    b.add(new THREE.SphereGeometry(tr, 22, 12, 0, TAU, 0, Math.PI * 0.62), C.top, chest, tS);
-    b.add(new THREE.SphereGeometry(tr * 1.02, 22, 8, 0, TAU, Math.PI * 0.58, Math.PI * 0.42), C.bottom, hips, { ...tS, sx: tS.sx * waist });
-    // 뱃살: 몸무게가 늘면 배 앞쪽이 둥글게 나옴
-    if (wt > 0.3) {
-      const k = (wt - 0.3) / 0.7;
-      b.add(new THREE.SphereGeometry(0.19, 16, 12), C.top, chest, {
-        y: 0.12, z: tr * girthZ - 0.13 + 0.03 * k, sx: girthX * 0.92, sy: 0.82, sz: 0.55 + 0.2 * k,
-      });
-    }
-    // 가슴 (근육질 남자 / 여자) — 몸통 안쪽으로 묻어 매끈하게
-    const chestAmt = female ? 0.35 + wt * 0.2 : Math.max(0, mus - 0.35) * 1.4 + st.chest * 0.6;
-    if (chestAmt > 0.05) {
-      for (const side of [-1, 1]) {
-        b.add(new THREE.SphereGeometry(0.1, 12, 10), C.top, chest, {
-          x: side * 0.09 * sw, y: female ? 0.3 : 0.33, z: 0.14 * girthZ + 0.012, sx: 1.05, sy: female ? 0.95 : 0.8, sz: 0.3 + chestAmt * 0.3,
-        });
+
+    // 팔을 내렸을 때 몸통을 파고들지 않는 최소 벌림 각도 (체형마다 계산)
+    {
+      const armR = (d) => armR0 * 1.18 * (1 + (mus * 0.16 + st.arms * 0.1));
+      const handR = 0.062 * limb;
+      let need = 0;
+      for (let th = 0; th <= 1.0; th += 0.01) {
+        let ok = true;
+        // 어깨 관절 근처(d<0.09)는 원래 몸통과 맞닿는 부분이라 제외, 그 아래 팔·손이 몸에 묻히지 않게
+        for (let d = 0.06; d <= UPPER_ARM + 0.155; d += 0.01) {
+          const y = SHOULDER_Y - d * Math.cos(th);
+          const x = shoulderX + d * Math.sin(th);
+          const r = d > UPPER_ARM + 0.12 ? handR : armR(d);
+          if (x - r < shape.rx(y) + 0.006) { ok = false; break; }
+        }
+        need = th;
+        if (ok) break;
       }
+      this.armOut0 = need + 0.06; // 걷기 흔들림(-0.06)까지 고려
     }
-    if (O.hood) b.add(new THREE.SphereGeometry(0.16, 14, 10), C.top, chest, { y: 0.44, z: -0.12, sx: 1.35, sy: 0.55, sz: 0.65 });
-    if (a.outfit === 'tracksuit') b.add(new THREE.CylinderGeometry(0.105, 0.115, 0.05, 14), C.white, chest, { y: 0.47 }); // 흰 목깃
-    if (a.acc.neck === 'necklace') {
-      b.add(new THREE.TorusGeometry(0.115, 0.01, 4, 20), C.gold, chest, { y: 0.44, z: 0.025, rx: Math.PI / 2 + 0.35 });
-      b.add(new THREE.SphereGeometry(0.022, 8, 6), C.gold, chest, { y: 0.39, z: 0.13 });
+
+    // ── 팔: 어깨~손목 관 하나 + 동그란 손. 소매는 같은 관의 색 + 소매단 ──
+    for (const [arm, elbow, side] of [[armL, elbowL, -1], [armR, elbowR, 1]]) {
+      const len = UPPER_ARM + 0.135;
+      const bicep = mus * 0.16 + st.arms * 0.1;
+      const base = (sv) => armR0 * (1 - 0.14 * (sv / len)) * (1 + bicep * Math.exp(-(((sv - 0.065) / 0.035) ** 2)));
+      const sleeveEdge = 0.07;
+      let radius = base;
+      let paint = () => C.skin;
+      if (O.longSleeve) {
+        radius = (sv) => base(sv) * 1.07;
+        paint = (sv) => (a.outfit === 'tracksuit' && sv > len - 0.03 ? C.white : C.top);
+      } else if (!O.sleeveless) {
+        radius = hemRadius(base, sleeveEdge, 1.16);
+        paint = (sv) => (sv < sleeveEdge ? C.top : C.skin);
+      }
+      b.addSkinned(tubePart({
+        pivot: [side * shoulderX, SHOULDER_Y, 0], len, joint: UPPER_ARM, bones: [arm.name, elbow.name], radius, paint,
+      }), HIP_Y);
+      b.add(G.sphere(0.062 * limb, 14, 10), C.skin, elbow, { y: -0.155 }); // 동그란 손
     }
+
+    // ── 치장 아이템 (몸) ──
+    if (a.acc.print) addPrint(a.acc.print, { b, chest, shape, topColor: C.top, sw });
+    if (a.acc.neck) addNeckItem(a.acc.neck, { b, chest, shape });
+    if (a.acc.back) addBackItem(a.acc.back, { b, chest, shape, sw });
 
     // ── 머리 ──
-    this._addHead(b, head, a, C, female, cheek);
-
-    // ── 팔 (윗팔 + 아래팔·손) ──
-    for (const [arm, elbow, side] of [[armL, elbowL, -1], [armR, elbowR, 1]]) {
-      const upperColor = O.sleeveless ? C.skin : (O.longSleeve ? C.top : C.skin);
-      // 어깨: 팔 굵기와 거의 같게 (튀어나오지 않게)
-      // 어깨(삼각근): 근육량이 많을수록 둥글게
-      b.add(new THREE.SphereGeometry(armR0 + 0.004 + st.shoulders * 0.015 + mus * 0.012, 12, 10), O.sleeveless ? C.skin : C.top, arm, { y: -0.01, sx: 1.08, sy: 0.92, sz: 1.0 });
-      b.add(new THREE.CapsuleGeometry(armR0, 0.08, 4, 12), upperColor, arm, { y: -0.075 });
-      if (!O.longSleeve && !O.sleeveless) b.add(new THREE.CapsuleGeometry(armR0 + 0.007, 0.03, 4, 12), C.top, arm, { y: -0.035 });
-      b.add(new THREE.CapsuleGeometry(armR0 * 0.94, 0.06, 4, 12), O.longSleeve ? C.top : C.skin, elbow, { y: -0.06 });
-      if (a.outfit === 'tracksuit') b.add(new THREE.CapsuleGeometry(armR0 * 0.96 + 0.004, 0.012, 3, 12), C.white, elbow, { y: -0.115 });
-      b.add(new THREE.SphereGeometry(0.066 * limb, 12, 10), C.skin, elbow, { y: -0.155 });
-      void side;
-    }
+    // 긴 머리가 몸통을 뚫지 않도록 등 표면 위치를 알려줌
+    let backZ = 0;
+    for (let y = 0.05; y <= 0.46; y += 0.03) backZ = Math.min(backZ, shape.point(y, Math.PI)[1]);
+    this._addHead(b, head, a, C, female, cheek, { backZ, hasBackItem: !!a.acc.back });
 
     const geo = b.build();
     const mesh = new THREE.SkinnedMesh(geo, getCharacterMaterial());
@@ -810,34 +934,45 @@ export class CharacterModel {
       root, hips, torso, chest, head, legL, kneeL, legR, kneeR, armL, elbowL, armR, elbowR,
     };
     this.heightScale = heightScale;
-    this.height = (HIP_Y + NECK_Y + HEAD_C + HEAD_R + (a.hair === 'afro' || a.hair === 'topknot' || a.hair === 'mohawk' ? 0.12 : 0)) * heightScale;
+    const hairExtra = !a.acc.hat && (a.hair === 'afro' || a.hair === 'topknot' || a.hair === 'mohawk') ? 0.12 : 0;
+    const hatExtra = {
+      party_hat: 0.28, bunny_ears: 0.24, halo: 0.2, cowboy: 0.16, crown: 0.14, cat_ears: 0.07,
+    }[a.acc.hat] || 0;
+    this.height = (HIP_Y + NECK_Y + HEAD_C + HEAD_R + Math.max(hairExtra, hatExtra)) * heightScale;
     this.blob.scale.setScalar(heightScale * (0.85 + wt * 0.25) * sw);
     if (prevExercise) { this.exercise = null; this.setExercise(prevExercise); }
+    this._syncFx();
     this._placeLabels();
     this.update(0, 0);
   }
 
-  _addShoe(b, knee, style, C, legR0) {
+  _addShoe(b, knee, baseStyle, C0, legR0, over = null) {
     const y = -0.175;
     const w = Math.max(1, legR0 / 0.08);
+    // 신발 아이템을 신으면 기본 신발 대신 아이템 모양/색
+    const C = over ? { ...C0, shoe: over.color, sole: over.sole } : C0;
+    const style = over ? ({ bunny: 'sneakers', rocket: 'sneakers' }[over.style] || over.style) : baseStyle;
+    addShoeExtras(over, b, knee, y, w);
     if (style === 'slides') {
-      b.add(new THREE.SphereGeometry(0.085, 14, 10), C.skin, knee, { y, z: 0.03, sx: w, sy: 0.6, sz: 1.3 });
-      b.add(new THREE.SphereGeometry(0.095, 14, 8), C.shoe, knee, { y: y + 0.005, z: 0.05, sx: 1.08 * w, sy: 0.5, sz: 0.72 });
-      b.add(new THREE.CylinderGeometry(0.095, 0.095, 0.022, 16), C.sole, knee, { y: y - 0.05, z: 0.03, sx: 1.05 * w, sz: 1.4 });
+      b.add(G.sphere(0.085, 14, 10), C.skin, knee, { y, z: 0.03, sx: w, sy: 0.6, sz: 1.3 });
+      b.add(G.sphere(0.095, 14, 8), C.shoe, knee, { y: y + 0.005, z: 0.05, sx: 1.08 * w, sy: 0.5, sz: 0.72 });
+      b.add(G.cylinder(0.095, 0.095, 0.022, 16), C.sole, knee, { y: y - 0.05, z: 0.03, sx: 1.05 * w, sz: 1.4 });
       return;
     }
     // 둥글고 짧은 신발
-    b.add(new THREE.SphereGeometry(0.1, 16, 12), C.shoe, knee, { y, z: 0.03, sx: 1.02 * w, sy: 0.66, sz: 1.28 });
-    b.add(new THREE.CylinderGeometry(0.098, 0.098, 0.022, 16), C.sole, knee, { y: y - 0.054, z: 0.03, sx: 1.03 * w, sz: 1.3 });
-    if (style === 'hightop') b.add(new THREE.CylinderGeometry(0.092, 0.098, 0.1, 14), C.shoe, knee, { y: y + 0.055, sx: w, sz: w });
+    b.add(G.sphere(0.1, 16, 12), C.shoe, knee, { y, z: 0.03, sx: 1.02 * w, sy: 0.66, sz: 1.28 });
+    b.add(G.cylinder(0.098, 0.098, 0.022, 16), C.sole, knee, { y: y - 0.054, z: 0.03, sx: 1.03 * w, sz: 1.3 });
+    if (style === 'hightop') b.add(G.cylinder(0.092, 0.098, 0.1, 14), C.shoe, knee, { y: y + 0.055, sx: w, sz: w });
   }
 
-  _addHead(b, head, a, C, female, cheek) {
+  _addHead(b, head, a, C, female, cheek, body = { backZ: -0.2, hasBackItem: false }) {
     const c = HEAD_C;
     const face = FACE_KINDS.includes(a.face) ? a.face : 'round';
     const hw = headHalfWidth(face, cheek);
     const wr = Math.sqrt(hw / HEAD_R); // 얼굴 폭에 맞춰 눈 간격을 조금만 조정
-    const H = { face, cheek, c, hw };
+    const H = {
+      face, cheek, c, hw, backZ: body.backZ, hasBackItem: body.hasBackItem,
+    };
     // 얼굴 표면 위 (x, y) 에 파츠를 붙임: 위치 + 표면 기울기 + 파츠 자체 회전(rz)
     const onFace = (x, y, lift, t = {}) => {
       const p = facePlacement(face, cheek, x, y, lift);
@@ -851,47 +986,67 @@ export class CharacterModel {
 
     // 귀: 머리 옆면에 반쯤 묻히게
     for (const side of [-1, 1]) {
-      b.add(new THREE.SphereGeometry(0.048, 10, 8), C.skin, head, {
+      b.add(G.sphere(0.048, 10, 8), C.skin, head, {
         x: side * (hw - 0.004), y: c - 0.015, z: -0.01, sx: 0.55, sy: 1, sz: 0.8,
       });
-      if (a.acc.ears === 'earrings') {
-        b.add(new THREE.SphereGeometry(0.022, 8, 6), C.gold, head, { x: side * (hw + 0.004), y: c - 0.075, z: 0 });
-      }
     }
+    if (a.acc.ears) addEarItem(a.acc.ears, { b, head, H });
 
-    // ── 눈 ──
-    const eyeY = 0.012;
-    const eyeX = 0.1 * wr;
-    const eyeS = female ? 1.05 : 1;
+    b.tag = 'face'; // (개발용 검사 도구 표시) 여기부터 이목구비
+    // ── 눈 (동물의숲 느낌: 크고 동글, 하이라이트) ──
+    const eyeY = 0.0;
+    const eyeX = 0.105 * wr;
     const eyeStyle = a.eyes || 'round';
+    const iris = a.eyeColor || C.eye;
+    const darkIris = iris === C.eye;
+    const arcEye = (x) => b.add(G.torus(0.032, 0.0085, 4, 14, Math.PI), C.eye, head, onFace(x, eyeY - 0.012, 0.002, { sz: 0.6 }));
+    const roundEye = (x, side, { w = 0.9, h = 1.15, r = 0.044, hl = 1, tilt = 0 } = {}) => {
+      b.add(G.sphere(r, 14, 10), C.eye, head, onFace(x, eyeY, 0.002, { sx: w, sy: h, sz: 0.38, rz: tilt }));
+      if (!darkIris) b.add(G.sphere(r * 0.72, 12, 8), iris, head, onFace(x, eyeY - r * 0.18, 0.006, { sx: w, sy: h * 0.9, sz: 0.3, rz: tilt }));
+      if (hl > 0) {
+        b.add(G.sphere(0.013 * hl, 8, 6), C.white, head, onFace(x + 0.013, eyeY + 0.018, 0.016, { sz: 0.5 }));
+        if (hl > 1) b.add(G.sphere(0.0075, 6, 5), C.white, head, onFace(x - 0.012, eyeY - 0.018, 0.016, { sz: 0.5 }));
+      }
+      void side;
+    };
     for (const side of [-1, 1]) {
       const x = side * eyeX;
-      if (eyeStyle === 'smile') {
-        b.add(new THREE.TorusGeometry(0.032, 0.008, 4, 14, Math.PI), C.eye, head, onFace(x, eyeY - 0.01, 0.002, { sz: 0.6 }));
-      } else if (eyeStyle === 'sleepy') {
-        b.add(new THREE.SphereGeometry(0.038, 12, 8), C.eye, head, onFace(x, eyeY - 0.006, 0.002, { sx: 1.05, sy: 0.42, sz: 0.4 }));
-        b.add(new THREE.CapsuleGeometry(0.006, 0.05, 2, 6), C.skin, head, onFace(x, eyeY + 0.01, 0.01, { rz: Math.PI / 2, sz: 0.7 }));
-      } else {
-        const eyeH = eyeStyle === 'oval' ? 1.3 : eyeStyle === 'sharp' ? 0.8 : 1.12;
-        const eyeW = eyeStyle === 'sharp' ? 1.2 : 0.9;
-        const r = eyeStyle === 'sparkle' ? 0.044 : 0.039;
-        b.add(new THREE.SphereGeometry(r, 14, 10), C.eye, head, onFace(x, eyeY, 0.002, {
-          sx: eyeW * eyeS, sy: eyeH * eyeS, sz: 0.4, rz: eyeStyle === 'sharp' ? side * -0.18 : 0,
-        }));
-        if (eyeStyle !== 'sharp') {
-          const hr = eyeStyle === 'sparkle' ? 0.017 : 0.012;
-          b.add(new THREE.SphereGeometry(hr, 8, 6), C.white, head, onFace(x + 0.012, eyeY + 0.016, 0.014, { sz: 0.5 }));
-          if (eyeStyle === 'sparkle') {
-            b.add(new THREE.SphereGeometry(0.007, 6, 5), C.white, head, onFace(x - 0.012, eyeY - 0.016, 0.014, { sz: 0.5 }));
+      switch (eyeStyle) {
+        case 'smile': arcEye(x); break;
+        case 'wink': if (side > 0) arcEye(x); else roundEye(x, side); break;
+        case 'dot':
+          b.add(G.sphere(0.024, 10, 8), C.eye, head, onFace(x, eyeY, 0.002, { sy: 1.15, sz: 0.4 }));
+          b.add(G.sphere(0.007, 6, 5), C.white, head, onFace(x + 0.007, eyeY + 0.01, 0.01, { sz: 0.5 }));
+          break;
+        case 'sleepy':
+          b.add(G.sphere(0.042, 12, 8, 0, TAU, Math.PI / 2, Math.PI / 2), C.eye, head, onFace(x, eyeY + 0.004, 0.002, { sx: 0.95, sy: 0.9, sz: 0.38 }));
+          b.add(G.capsule(0.0065, 0.07, 2, 6), C.eye, head, onFace(x, eyeY + 0.004, 0.008, { rz: Math.PI / 2, sz: 0.6 }));
+          break;
+        case 'sharp': roundEye(x, side, { w: 1.15, h: 0.85, tilt: side * -0.2, hl: 0.8 }); break;
+        case 'oval': roundEye(x, side, { w: 0.82, h: 1.35 }); break;
+        case 'sparkle': roundEye(x, side, { r: 0.048, hl: 1.35 }); break;
+        case 'lash':
+          roundEye(x, side);
+          for (const k of [0, 1, 2]) {
+            b.add(G.capsule(0.005, 0.024, 2, 5), C.eye, head, onFace(x + side * (0.03 + k * 0.006), eyeY + 0.038 - k * 0.014, 0.004, { rz: side * (-0.5 - k * 0.35), sz: 0.6 }));
           }
+          break;
+        case 'round':
+        default:
+          roundEye(x, side);
+          if (female) b.add(G.capsule(0.0055, 0.028, 2, 5), C.eye, head, onFace(x + side * 0.036, eyeY + 0.034, 0.004, { rz: side * -0.6, sz: 0.6 }));
+          break;
+      }
+      // 볼
+      const cx = side * 0.17 * wr;
+      if (a.cheeks === 'freckles') {
+        for (const [dx, dy] of [[-0.018, 0.006], [0.0, -0.01], [0.018, 0.004]]) {
+          b.add(G.sphere(0.0065, 6, 5), '#b7774f', head, onFace(cx + side * dx, -0.07 + dy, 0.001, { sz: 0.35 }));
         }
+      } else if (a.cheeks !== 'none') {
+        const rosy = a.cheeks === 'rosy';
+        b.add(G.sphere(rosy ? 0.05 : 0.042, 12, 8), rosy ? '#ff7d95' : C.blush, head, onFace(cx, -0.072, 0.001, { sx: 1.2, sy: 0.65, sz: 0.15 }));
       }
-      // 여자 캐릭터 속눈썹 (바깥 눈꼬리)
-      if (female && eyeStyle !== 'smile' && eyeStyle !== 'sleepy') {
-        b.add(new THREE.CapsuleGeometry(0.006, 0.03, 2, 5), C.eye, head, onFace(x + side * 0.034, eyeY + 0.03, 0.004, { rz: side * -0.6, sz: 0.6 }));
-      }
-      // 볼터치: 눈 아래 바깥쪽
-      b.add(new THREE.SphereGeometry(0.042, 10, 6), C.blush, head, onFace(side * 0.165 * wr, -0.075, 0.001, { sx: 1.2, sy: 0.6, sz: 0.15 }));
     }
 
     // ── 눈썹 ──
@@ -899,52 +1054,53 @@ export class CharacterModel {
       const angled = a.brows === 'angled';
       for (const side of [-1, 1]) {
         const rz = Math.PI / 2 + (angled ? side * -0.3 : a.brows === 'straight' ? 0 : side * -0.1);
-        b.add(new THREE.CapsuleGeometry(angled ? 0.011 : 0.008, angled ? 0.05 : 0.045, 3, 8), C.brow, head, onFace(side * eyeX, 0.088, 0.004, { rz, sz: 0.55 }));
+        b.add(G.capsule(angled ? 0.011 : 0.008, angled ? 0.05 : 0.045, 3, 8), C.brow, head, onFace(side * eyeX, 0.088, 0.004, { rz, sz: 0.55 }));
       }
     }
 
     // ── 코 ──
     const noseY = -0.045;
     if (a.nose === 'dot') {
-      b.add(new THREE.SphereGeometry(0.011, 8, 6), C.mouth, head, onFace(0, noseY, 0.002, { sz: 0.5 }));
+      b.add(G.sphere(0.011, 8, 6), C.mouth, head, onFace(0, noseY, 0.002, { sz: 0.5 }));
     } else if (a.nose === 'round') {
-      b.add(new THREE.SphereGeometry(0.026, 10, 8), C.skin, head, onFace(0, noseY, 0.004, { sx: 1.05, sy: 0.8, sz: 0.7 }));
+      b.add(G.sphere(0.026, 10, 8), C.skin, head, onFace(0, noseY, 0.004, { sx: 1.05, sy: 0.8, sz: 0.7 }));
     } else if (a.nose !== 'none') {
-      b.add(new THREE.SphereGeometry(0.019, 10, 8), C.skin, head, onFace(0, noseY, 0.004, { sy: 0.75, sz: 0.75 }));
+      b.add(G.sphere(0.019, 10, 8), C.skin, head, onFace(0, noseY, 0.004, { sy: 0.75, sz: 0.75 }));
     }
 
     // ── 입 ──
     const mY = -0.112;
     switch (a.mouth || 'smile') {
       case 'small':
-        b.add(new THREE.CapsuleGeometry(0.006, 0.026, 2, 6), C.mouth, head, onFace(0, mY, 0.002, { rz: Math.PI / 2, sz: 0.6 }));
+        b.add(G.capsule(0.006, 0.026, 2, 6), C.mouth, head, onFace(0, mY, 0.002, { rz: Math.PI / 2, sz: 0.6 }));
         break;
       case 'open':
-        b.add(new THREE.SphereGeometry(0.028, 10, 8), C.mouth, head, onFace(0, mY - 0.004, 0.001, { sx: 0.85, sy: 0.95, sz: 0.3 }));
-        b.add(new THREE.SphereGeometry(0.012, 7, 5), '#f08b9e', head, onFace(0, mY - 0.016, 0.006, { sx: 1.1, sy: 0.6, sz: 0.3 }));
+        b.add(G.sphere(0.028, 10, 8), C.mouth, head, onFace(0, mY - 0.004, 0.001, { sx: 0.85, sy: 0.95, sz: 0.3 }));
+        b.add(G.sphere(0.012, 7, 5), '#f08b9e', head, onFace(0, mY - 0.016, 0.006, { sx: 1.1, sy: 0.6, sz: 0.3 }));
         break;
       case 'cat':
         for (const side of [-1, 1]) {
-          b.add(new THREE.TorusGeometry(0.014, 0.006, 4, 10, Math.PI), C.mouth, head, onFace(side * 0.014, mY + 0.004, 0.002, { rz: Math.PI, sz: 0.6 }));
+          b.add(G.torus(0.014, 0.006, 4, 10, Math.PI), C.mouth, head, onFace(side * 0.014, mY + 0.004, 0.002, { rz: Math.PI, sz: 0.6 }));
         }
         break;
       case 'grin':
-        b.add(new THREE.SphereGeometry(0.04, 12, 8, 0, TAU, Math.PI / 2, Math.PI / 2), C.mouth, head, onFace(0, mY + 0.012, 0.001, { sx: 1, sy: 0.75, sz: 0.3 }));
-        b.add(new THREE.BoxGeometry(0.05, 0.01, 0.004), C.white, head, onFace(0, mY + 0.006, 0.006));
+        b.add(G.sphere(0.04, 12, 8, 0, TAU, Math.PI / 2, Math.PI / 2), C.mouth, head, onFace(0, mY + 0.012, 0.001, { sx: 1, sy: 0.75, sz: 0.3 }));
+        b.add(G.box(0.044, 0.01, 0.004), C.white, head, onFace(0, mY + 0.006, 0.009));
         break;
       case 'neutral':
-        b.add(new THREE.CapsuleGeometry(0.0055, 0.036, 2, 6), C.mouth, head, onFace(0, mY, 0.002, { rz: Math.PI / 2, sz: 0.6 }));
+        b.add(G.capsule(0.0055, 0.036, 2, 6), C.mouth, head, onFace(0, mY, 0.002, { rz: Math.PI / 2, sz: 0.6 }));
         break;
       case 'smile':
       default:
-        b.add(new THREE.TorusGeometry(0.026, 0.007, 4, 12, Math.PI), C.mouth, head, onFace(0, mY + 0.006, 0.002, { rz: Math.PI, sz: 0.6 }));
+        b.add(G.torus(0.026, 0.007, 4, 12, Math.PI), C.mouth, head, onFace(0, mY + 0.006, 0.002, { rz: Math.PI, sz: 0.6 }));
         break;
     }
 
+    b.tag = null;
     // ── 헤어 + 모자/안경 ──
     // 위로 솟는 머리(모히칸·아프로 등)는 모자를 쓰면 모자 밑으로 눌린 짧은 머리로 표시
     const tall = ['mohawk', 'afro', 'topknot', 'bun', 'spiky', 'heihachi'];
-    const hair = a.acc?.hat && tall.includes(a.hair) ? 'buzz' : a.hair;
+    const hair = hatFlattensHair(a.acc?.hat) && tall.includes(a.hair) ? 'buzz' : a.hair;
     this._addHair(b, head, hair, C.hair, H);
     this._addHeadAcc(b, head, a, H, onFace, eyeX);
   }
@@ -956,7 +1112,8 @@ export class CharacterModel {
    */
   _addHair(b, head, style, color, H) {
     const { face, cheek, c, hw } = H;
-    const shell = (keep, scale, seg = 22) => b.add(shellGeometry(buildShell(face, cheek, { keep, scale, seg })), color, head, { y: c });
+    // 모든 머리카락은 얼굴 보호 구역(outsideFace)을 침범하지 않음 → 눈썹·눈이 가려지지 않음
+    const shell = (keep, scale, seg = 22) => b.add(shellGeometry(buildShell(face, cheek, { keep: (n, p) => keep(n, p) && outsideFace(n, p), scale, seg })), color, head, { y: c });
     const cap = (scale = 1.06, F = 0.45, S = 0.2, B = -0.55) => shell((n) => n[1] > hairline(n, F, S, B), scale);
     // 앞머리: 이마 앞쪽만 조금 더 두껍게 (눈썹보다 위에서 끝남)
     const fringe = (scale = 1.095, low = 0.37) => shell((n) => n[2] > 0.3 && n[1] > low && n[1] < 0.8, scale, 26);
@@ -981,7 +1138,7 @@ export class CharacterModel {
         for (const [dx, dy, dz] of dirs) {
           const v = new THREE.Vector3(dx, dy, dz).normalize();
           const q = new THREE.Quaternion().setFromUnitVectors(UP, v);
-          b.add(new THREE.ConeGeometry(0.07, 0.16, 7), color, head, { ...at(dx, dy, dz, 1.0, 0.06), quat: q });
+          b.add(G.cone(0.07, 0.16, 7), color, head, { ...at(dx, dy, dz, 1.0, 0.06), quat: q });
         }
         break;
       }
@@ -989,29 +1146,35 @@ export class CharacterModel {
         cap(1.065, 0.45, 0.08, -0.8);
         fringe();
         // 등까지 내려오는 뒷머리 + 얼굴 옆으로 흘러내리는 옆머리
-        b.add(new THREE.CapsuleGeometry(0.2, 0.5, 6, 14), color, head, { x: 0, y: c - 0.3, z: -0.17, sx: 1.3 * wx, sz: 0.5 });
+        // 뒷머리는 항상 등 표면보다 뒤에 (체중이 늘어도 몸이 머리카락을 뚫지 않음)
+        // 등 아이템(가방·날개 등)을 메면 어깨 길이로 짧게 묶음
+        if (H.hasBackItem) {
+          b.add(G.capsule(0.2, 0.12, 6, 14), color, head, { x: 0, y: c - 0.15, z: -0.12, sx: 1.3 * wx, sy: 0.7, sz: 0.62 });
+        } else {
+          b.add(G.capsule(0.2, 0.5, 6, 14), color, head, { x: 0, y: c - 0.3, z: Math.min(-0.17, H.backZ - 0.105), sx: 1.3 * wx, sz: 0.5 });
+        }
         for (const side of [-1, 1]) {
-          b.add(new THREE.CapsuleGeometry(0.055, 0.32, 4, 10), color, head, { x: side * (hw - 0.01), y: c - 0.2, z: -0.02 });
+          b.add(G.capsule(0.055, 0.2, 4, 10), color, head, { x: side * (hw - 0.01), y: c - 0.15, z: -0.02 });
         }
         break;
       case 'ponytail':
         cap(1.06, 0.45, 0.16, -0.6);
         fringe();
-        b.add(new THREE.SphereGeometry(0.065, 10, 8), color, head, at(0, 0.3, -1, 1.05, 0.02));
-        b.add(new THREE.CapsuleGeometry(0.06, 0.24, 4, 12), color, head, { ...at(0, -0.15, -1, 1.05, 0.07), rx: 0.3 });
+        b.add(G.sphere(0.065, 10, 8), color, head, at(0, 0.3, -1, 1.05, 0.02));
+        b.add(G.capsule(0.06, 0.24, 4, 12), color, head, { ...at(0, -0.15, -1, 1.05, 0.07), rx: 0.3 });
         break;
       case 'pigtails':
         cap(1.06, 0.45, 0.16, -0.6);
         fringe();
         for (const side of [-1, 1]) {
-          b.add(new THREE.SphereGeometry(0.07, 10, 8), color, head, at(side, 0.15, -0.25, 1.05, 0.02));
-          b.add(new THREE.CapsuleGeometry(0.06, 0.2, 4, 10), color, head, { ...at(side, -0.35, -0.3, 1.05, 0.06), rz: side * 0.25 });
+          b.add(G.sphere(0.07, 10, 8), color, head, at(side, 0.15, -0.25, 1.05, 0.02));
+          b.add(G.capsule(0.06, 0.2, 4, 10), color, head, { ...at(side, -0.35, -0.3, 1.05, 0.06), rz: side * 0.25 });
         }
         break;
       case 'bun':
         cap(1.06, 0.45, 0.16, -0.6);
         fringe();
-        b.add(new THREE.SphereGeometry(0.11, 14, 12), color, head, at(0, 1, -0.35, 1.04, 0.06));
+        b.add(G.sphere(0.11, 14, 12), color, head, at(0, 1, -0.35, 1.04, 0.06));
         break;
       case 'bowl':
         // 바가지머리: 귀 윗선까지 둥글게 덮고 앞머리는 눈썹 위에서 일자로
@@ -1021,15 +1184,15 @@ export class CharacterModel {
         // 정수리는 맨머리, 옆·뒤 띠 + 양옆으로 솟은 뿔
         shell((n) => n[1] < 0.5 && n[1] > hairline(n, 9, 0.02, -0.45), 1.045);
         for (const side of [-1, 1]) {
-          b.add(new THREE.ConeGeometry(0.09, 0.3, 10), color, head, { ...at(side, 0.55, -0.1, 1, 0.07), rz: -side * 0.8, sz: 0.65 });
-          b.add(new THREE.ConeGeometry(0.065, 0.22, 10), color, head, { ...at(side, 0.25, -0.3, 1, 0.05), rz: -side * 1.1, sz: 0.6 });
+          b.add(G.cone(0.09, 0.3, 10), color, head, { ...at(side, 0.55, -0.1, 1, 0.07), rz: -side * 0.8, sz: 0.65 });
+          b.add(G.cone(0.065, 0.22, 10), color, head, { ...at(side, 0.25, -0.3, 1, 0.05), rz: -side * 1.1, sz: 0.6 });
         }
         break;
       }
       case 'mohawk':
         // 가운데 줄만 남기고 볏처럼 세움
         shell((n) => Math.abs(n[0]) < 0.2 && n[1] > hairline(n, 0.48, 0.1, -0.5), 1.03);
-        b.add(new THREE.SphereGeometry(0.2, 18, 12), color, head, { ...at(0, 1, -0.15, 1, -0.02), sx: 0.22, sy: 0.75, sz: 1.3, rx: -0.15 });
+        b.add(G.sphere(0.2, 18, 12), color, head, { ...at(0, 1, -0.15, 1, -0.02), sx: 0.22, sy: 0.75, sz: 1.3, rx: -0.15 });
         break;
       case 'afro':
         // 정수리·뒤로 부풀고, 이마 선(F)은 눈썹 위에서 끝남
@@ -1039,8 +1202,8 @@ export class CharacterModel {
       case 'topknot':
         cap(1.05, 0.45, 0.18, -0.55);
         fringe();
-        b.add(new THREE.SphereGeometry(0.075, 12, 10), color, head, { ...at(0, 1, -0.1, 1.05, 0.06), sy: 1.25 });
-        b.add(new THREE.CylinderGeometry(0.05, 0.06, 0.04, 12), '#e8505b', head, at(0, 1, -0.1, 1.05, 0.012));
+        b.add(G.sphere(0.075, 12, 10), color, head, { ...at(0, 1, -0.1, 1.05, 0.06), sy: 1.25 });
+        b.add(G.cylinder(0.05, 0.06, 0.04, 12), '#e8505b', head, at(0, 1, -0.1, 1.05, 0.012));
         break;
       case 'short':
       default:
@@ -1053,41 +1216,17 @@ export class CharacterModel {
   _addHeadAcc(b, head, a, H, onFace, eyeX) {
     const { face, cheek, c } = H;
     const acc = a.acc || {};
-    const shell = (keep, scale, color, seg = 22) => b.add(shellGeometry(buildShell(face, cheek, { keep, scale, seg })), color, head, { y: c });
-    if (acc.hat === 'cap') {
-      shell((n) => n[1] > hairline(n, 0.4, 0.26, -0.05), 1.16, '#3d7dd8');
-      // 챙: 이마 앞쪽 모자 테두리에서 앞으로
-      const n = [0, 0.4, 0.917];
-      const d = surfaceDist(face, cheek, n[0], n[1], n[2]) * 1.16;
-      b.add(new THREE.CylinderGeometry(0.16, 0.16, 0.018, 18), '#3d7dd8', head, {
-        x: 0, y: c + n[1] * d - 0.005, z: n[2] * d + 0.07, sz: 0.85, rx: 0.12,
-      });
-    } else if (acc.hat === 'beanie') {
-      shell((n) => n[1] > hairline(n, 0.42, 0.22, -0.2), 1.16, '#e8505b');
-      // 접힌 단
-      shell((n) => {
-        const h = hairline(n, 0.42, 0.22, -0.2);
-        return n[1] > h && n[1] < h + 0.14;
-      }, 1.2, '#e8505b');
-      b.add(new THREE.SphereGeometry(0.06, 10, 8), '#ffffff', head, { y: c + surfaceDist(face, cheek, 0, 1, 0) * 1.16 + 0.04 });
-    } else if (acc.hat === 'headband') {
-      shell((n) => {
-        const h = hairline(n, 0.42, 0.3, 0.1);
-        return n[1] > h && n[1] < h + 0.12;
-      }, 1.12, '#f6d55c');
-    }
-    if (acc.eyes === 'round_glasses' || acc.eyes === 'sunglasses') {
-      const sun = acc.eyes === 'sunglasses';
-      for (const side of [-1, 1]) {
-        if (sun) b.add(new THREE.SphereGeometry(0.06, 12, 8), '#1d1d22', head, onFace(side * eyeX, 0.012, 0.03, { sx: 1.15, sy: 0.85, sz: 0.25 }));
-        b.add(new THREE.TorusGeometry(0.056, 0.008, 4, 16), sun ? '#1d1d22' : '#3a3f4b', head, onFace(side * eyeX, 0.012, 0.035));
-        // 다리: 안경테에서 귀 쪽으로
-        b.add(new THREE.CapsuleGeometry(0.006, 0.2, 2, 4), '#3a3f4b', head, {
-          x: side * (H.hw + 0.004), y: c + 0.02, z: 0.1, rx: Math.PI / 2,
-        });
-      }
-      b.add(new THREE.CapsuleGeometry(0.007, 0.05, 2, 4), '#3a3f4b', head, onFace(0, 0.022, 0.04, { rz: Math.PI / 2 }));
-    }
+    const shell = (keep, scale, color, seg = 22) => b.add(shellGeometry(buildShell(face, cheek, { keep: (n, p) => keep(n, p) && outsideFace(n, p), scale, seg })), color, head, { y: c });
+    const at = (dx, dy, dz, s = 1, out = 0) => {
+      const l = Math.hypot(dx, dy, dz);
+      const d = surfaceDist(face, cheek, dx / l, dy / l, dz / l) * s + out;
+      return { x: (dx / l) * d, y: c + (dy / l) * d, z: (dz / l) * d };
+    };
+    const ctx = {
+      b, head, H, shell, at, onFace, eyeX,
+    };
+    if (acc.hat) addHat(acc.hat, ctx);
+    if (acc.eyes) addEyewear(acc.eyes, ctx);
   }
 
   _placeLabels() {

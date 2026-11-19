@@ -10,7 +10,7 @@ export const HEAD_R = 0.3;
 
 /** 얼굴형별 기본 반지름 (x, y, z) */
 const BASE = {
-  round: [1, 1, 1],
+  round: [1.04, 0.97, 1], // 동물의숲처럼 살짝 옆으로 넓은 동그란 얼굴
   oval: [0.93, 1.08, 0.96],
   vline: [1, 1, 1],
   square: [1, 1, 1],
@@ -138,7 +138,11 @@ export function buildShell(face, cheek, o) {
       const thc = ((i + 0.5) / rows) * Math.PI;
       const phc = ((j + 0.5) / cols) * Math.PI * 2 + Math.PI;
       const n = [Math.sin(thc) * Math.sin(phc), Math.cos(thc), Math.sin(thc) * Math.cos(phc)];
-      if (o.keep && !o.keep(n)) continue;
+      if (o.keep) {
+        // 칸 중심의 실제 표면 위치도 함께 넘김 (이마선 높이 판정용)
+        const dc = surfaceDist(face, cheek, n[0], n[1], n[2]);
+        if (!o.keep(n, [n[0] * dc, n[1] * dc, n[2] * dc])) continue;
+      }
       const a = id(i, j);
       const b = id(i + 1, j);
       const c = id(i + 1, j + 1);
@@ -151,4 +155,13 @@ export function buildShell(face, cheek, o) {
   const positions = new Float32Array(verts);
   const indices = positions.length / 3 > 65535 ? new Uint32Array(idx) : new Uint16Array(idx);
   return { positions, indices, dirs };
+}
+
+/**
+ * 얼굴 보호 구역: 얼굴 앞쪽(정면 기준 ±75°)에서는 이 높이(머리 중심 기준) 아래로
+ * 머리카락·모자가 내려오지 않습니다. 눈썹 윗선(0.099) + 여유.
+ */
+export const FACE_TOP = 0.118;
+export function outsideFace(n, p) {
+  return n[2] < 0.26 || p[1] > FACE_TOP;
 }

@@ -3,6 +3,7 @@ import * as THREE from 'three';
 import { CollisionWorld } from './CollisionWorld.js';
 import { findPunchingBagTarget } from './bagCollision.js';
 import { batchStatic } from './StaticBatcher.js';
+import { EQUIPMENT_LAYOUT, PUNCHING_BAGS } from '../shared/gymLayout.js';
 import {
   createBenchPress, createDumbbellRack, createTreadmill, createLegPress, createShoulderPress,
   createLatPulldown, createRestBench, createWaterCooler, createPlant, createVendingMachine,
@@ -12,6 +13,7 @@ import { EQUIPMENT_TYPES } from '../shared/equipmentTypes.js';
 import {
   createReceptionDesk, createPlateTree, createKettlebellRow, createStretchZone, createPunchingBag, createLockers,
   createTowelShelf, createWallClock, createSpeaker, createFloorTrack, createPoster,
+  createSofa, createArmchair, createCoffeeTable, createRug, createFloorLamp,
 } from './decor.js';
 
 export const GYM_SIZE = { width: 40, depth: 30, height: 5 };
@@ -19,29 +21,6 @@ export const SPAWN_POINT = { x: 0, z: 12, rotY: Math.PI }; // 입구 안쪽에�
 
 // 운동기구 배치표 — 기구를 추가/이동할 때는 이 표만 수정하면 됩니다.
 // id 는 Phase 2 이후 서버와 "누가 어떤 기구를 사용 중인지" 동기화할 때 사용합니다.
-const EQUIPMENT_LAYOUT = [
-  // 벤치프레스 / 프리웨이트 존
-  { id: 'bench-1', type: 'benchpress', x: -16, z: -10, rotY: 0 },
-  { id: 'bench-2', type: 'benchpress', x: -12, z: -10, rotY: 0 },
-  { id: 'bench-3', type: 'benchpress', x: -8, z: -10, rotY: 0 },
-  { id: 'dumbbell-1', type: 'dumbbell', x: -15, z: -3, rotY: 0 },
-  { id: 'dumbbell-2', type: 'dumbbell', x: -11, z: -3, rotY: 0 },
-  { id: 'dumbbell-3', type: 'dumbbell', x: -7, z: -3, rotY: 0 },
-  // 유산소 존
-  { id: 'treadmill-1', type: 'treadmill', x: 9.4, z: -10.5, rotY: 0 },
-  { id: 'treadmill-2', type: 'treadmill', x: 11.7, z: -10.5, rotY: 0 },
-  { id: 'treadmill-3', type: 'treadmill', x: 14, z: -10.5, rotY: 0 },
-  { id: 'treadmill-4', type: 'treadmill', x: 16.3, z: -10.5, rotY: 0 },
-  // 머신 존
-  { id: 'legpress-1', type: 'legpress', x: -16, z: 6, rotY: 0 },
-  { id: 'legpress-2', type: 'legpress', x: -12, z: 6, rotY: 0 },
-  { id: 'shoulder-1', type: 'shoulderpress', x: -8, z: 6, rotY: 0 },
-  { id: 'shoulder-2', type: 'shoulderpress', x: -4, z: 6, rotY: 0 },
-  // 동쪽 벽면 랫풀다운 존
-  { id: 'latpull-1', type: 'latpulldown', x: 17, z: -3, rotY: -Math.PI / 2 },
-  { id: 'latpull-2', type: 'latpulldown', x: 17, z: 1, rotY: -Math.PI / 2 },
-  { id: 'latpull-3', type: 'latpulldown', x: 17, z: 5, rotY: -Math.PI / 2 },
-];
 
 const FACTORIES = {
   benchpress: createBenchPress,
@@ -155,10 +134,12 @@ export class Gym {
     this.root.add(floor);
 
     // 구역별 고무 매트 (바닥 위 살짝)
+    // 매트끼리 겹치는 곳이 깜빡이지 않도록(z-fighting) 매트마다 높이를 2mm 씩 다르게
+    let matLayer = 0;
     const mat = (x, z, w, d, color) => {
       const p = new THREE.Mesh(new THREE.PlaneGeometry(w, d), m(color));
       p.rotation.x = -Math.PI / 2;
-      p.position.set(x, 0.005, z);
+      p.position.set(x, 0.003 + (matLayer++) * 0.002, z);
       p.receiveShadow = true;
       this.root.add(p);
     };
@@ -241,7 +222,7 @@ export class Gym {
     this._wallText('CARDIO', 13, 3.6, -D + 0.02, 0, 3.2, 0.6, '#3caea3', '#ffffff');
     this._wallText('FREE WEIGHT', -W + 0.02, 3.6, -4, Math.PI / 2, 4, 0.6, '#e8505b', '#ffffff');
     this._wallText('MACHINE', -W + 0.02, 3.6, 7, Math.PI / 2, 3.2, 0.6, '#8e6bd8', '#ffffff');
-    this._wallText('REST AREA', W - 0.02, 3.6, 9.5, -Math.PI / 2, 3.6, 0.6, '#b98e5b', '#ffffff');
+    this._wallText('LOUNGE', W - 0.02, 3.6, 9.5, -Math.PI / 2, 3.2, 0.6, '#b98e5b', '#ffffff');
 
     // 구역 구분은 바닥 라벨로도 표시해 처음 접속한 사람도 공간을 쉽게 파악하도록 합니다.
     this._floorText('BENCH PRESS', -12, -12.05, 3.5);
@@ -249,7 +230,7 @@ export class Gym {
     this._floorText('CARDIO', 13, -12.75, 2.8);
     this._floorText('MACHINE ZONE', -11, 9.05, 3.7);
     this._floorText('BAG TRAINING', 0, 5.35, 3.3);
-    this._floorText('REST AREA', 13.2, 4.5, 3.2);
+    this._floorText('LOUNGE', 12.8, 5.1, 2.6);
   }
 
   _wallText(text, x, y, z, rotY, w, h, bg, fg) {
@@ -270,6 +251,70 @@ export class Gym {
     mesh.position.set(x, y, z);
     mesh.rotation.y = rotY;
     this.root.add(mesh);
+  }
+
+  /** 라운지 벽의 랭킹 전광판 (캔버스에 그려서 30초마다 갱신 → 그리기 비용 거의 없음) */
+  _buildRankingBoard(x, y, z, rotY) {
+    const canvas = document.createElement('canvas');
+    canvas.width = 768;
+    canvas.height = 448;
+    this.rankCanvas = canvas;
+    this.rankTex = new THREE.CanvasTexture(canvas);
+    this.rankTex.colorSpace = THREE.SRGBColorSpace;
+    const frame = new THREE.Mesh(new THREE.BoxGeometry(3.5, 2.1, 0.08), m('#2b2d33'));
+    frame.position.set(x, y, z + 0.05);
+    frame.rotation.y = rotY;
+    this.root.add(frame);
+    const board = new THREE.Mesh(new THREE.PlaneGeometry(3.3, 1.92), new THREE.MeshBasicMaterial({ map: this.rankTex }));
+    board.position.set(x, y, z);
+    board.rotation.y = rotY;
+    board.userData.noBatch = true;
+    this.root.add(board);
+    this.setRankingBoard(null);
+  }
+
+  /** @param {{day:string, exercise:object[], bag:object[]}|null} data */
+  setRankingBoard(data) {
+    const c = this.rankCanvas;
+    if (!c) return;
+    const g = c.getContext('2d');
+    g.fillStyle = '#16202c';
+    g.fillRect(0, 0, c.width, c.height);
+    g.fillStyle = '#ffd84a';
+    g.font = 'bold 44px "Apple SD Gothic Neo", "Malgun Gothic", sans-serif';
+    g.textAlign = 'center';
+    g.textBaseline = 'middle';
+    g.fillText('🏆 오늘의 랭킹', c.width / 2, 40);
+    const col = (title, rows, fmt, cx) => {
+      g.fillStyle = '#7fe3d4';
+      g.font = 'bold 30px "Apple SD Gothic Neo", "Malgun Gothic", sans-serif';
+      g.textAlign = 'center';
+      g.fillText(title, cx, 104);
+      g.font = '27px "Apple SD Gothic Neo", "Malgun Gothic", sans-serif';
+      if (!rows || !rows.length) {
+        g.fillStyle = '#8a96a3';
+        g.fillText(data ? '아직 기록 없음' : '서버 연결 시 표시', cx, 200);
+        return;
+      }
+      rows.slice(0, 5).forEach((r, i) => {
+        const yy = 156 + i * 54;
+        g.fillStyle = i === 0 ? '#ffd84a' : i === 1 ? '#d9dee5' : i === 2 ? '#e3a36b' : '#ffffff';
+        g.textAlign = 'left';
+        g.fillText(`${i + 1}. ${String(r.nickname).slice(0, 8)}`, cx - 160, yy);
+        g.textAlign = 'right';
+        g.fillText(fmt(r.value), cx + 165, yy);
+      });
+    };
+    const fmtS = (s) => (s >= 3600 ? `${Math.floor(s / 3600)}h ${Math.floor((s % 3600) / 60)}m` : `${Math.floor(s / 60)}m ${s % 60}s`);
+    col('💪 운동 시간', data?.exercise, fmtS, c.width * 0.27);
+    col('🥊 샌드백', data?.bag, (v) => `${v}회`, c.width * 0.73);
+    g.strokeStyle = '#2f3d4d';
+    g.lineWidth = 3;
+    g.beginPath();
+    g.moveTo(c.width / 2, 90);
+    g.lineTo(c.width / 2, c.height - 20);
+    g.stroke();
+    this.rankTex.needsUpdate = true;
   }
 
   _floorText(text, x, z, width) {
@@ -296,7 +341,7 @@ export class Gym {
       new THREE.MeshBasicMaterial({ map: tex, transparent: true, depthWrite: false }),
     );
     mesh.rotation.x = -Math.PI / 2;
-    mesh.position.set(x, 0.018, z);
+    mesh.position.set(x, 0.035, z); // 매트보다 위
     mesh.renderOrder = 2;
     this.root.add(mesh);
   }
@@ -336,7 +381,7 @@ export class Gym {
   }
 
   /** 기구/벤치 하나를 상호작용 목록에 등록 (상호작용 지점·운동 자세 위치를 월드 좌표로 변환) */
-  _addInteractable({ id, type, x, z, rotY, interactPoint, spot, object = null, parts = {}, twoSided = false }) {
+  _addInteractable({ id, type, x, z, rotY, interactPoint, spot, object = null, anims = [], twoSided = false }) {
     const info = EQUIPMENT_TYPES[type];
     const c = Math.cos(rotY);
     const s = Math.sin(rotY);
@@ -356,7 +401,7 @@ export class Gym {
       // 등받이 없는 벤치: 앞/뒤 어느 쪽에서든 앉을 수 있음 (다가온 쪽을 바라보고 앉음)
       twoSided,
       object,
-      parts,
+      anims,
     });
   }
 
@@ -364,12 +409,24 @@ export class Gym {
     for (const item of EQUIPMENT_LAYOUT) {
       const obj = this._place(FACTORIES[item.type](), item.x, item.z, item.rotY, item.id);
       obj.group.name = item.id;
-      // 움직이는 부품의 기본 위치 기억 (운동 동작 때 움직임)
-      for (const part of Object.values(obj.movable || {})) part.userData.baseY = part.position.y;
+      // 움직이는 부품의 기본 위치 기억 (운동 중일 때만 움직임)
+      const anims = obj.anims || [];
+      for (const a of anims) a.base = a.obj.position.clone();
       this._addInteractable({
-        id: item.id, type: item.type, x: item.x, z: item.z, rotY: item.rotY, interactPoint: obj.interactPoint, object: obj.group, parts: obj.movable || {},
+        id: item.id, type: item.type, x: item.x, z: item.z, rotY: item.rotY, interactPoint: obj.interactPoint, object: obj.group, anims,
       });
+      this.resetEquipment({ anims });
     }
+  }
+
+  /** 소파/1인 소파: 등받이가 있어 앞(+z)을 보고 앉고, 일어나면 앞쪽으로 */
+  _placeSofa(obj, x, z, rotY, id) {
+    this._place(obj, x, z, rotY, id);
+    obj.seatXs.forEach((lx, i) => {
+      this._addInteractable({
+        id: `${id}-seat${i}`, type: 'seat', x, z, rotY, interactPoint: { x: lx, z: 0.78 }, spot: { x: lx, z: 0.08, y: 0.46, r: 0 },
+      });
+    });
   }
 
   /** 휴식 벤치 + 앉을 자리 등록 */
@@ -385,16 +442,47 @@ export class Gym {
     }
   }
 
-  /** 운동 중인 사람에 맞춰 기구 부품 움직이기 (바벨·랫풀다운 바) */
-  animateEquipment(it, k) {
-    const bar = it.parts.barbell;
-    if (bar) bar.position.y = bar.userData.baseY - 0.17 * (1 - k);
-    const pull = it.parts.pullBar;
-    if (pull) pull.position.y = pull.userData.baseY - 0.45 * k;
+  /**
+   * 운동 중인 사람에 맞춰 기구 부품 움직이기 (사용 중인 기구만 호출됨 → 평소엔 비용 0)
+   * @param {number} k 운동 진행도 0~1 (캐릭터 애니메이션과 같은 값)
+   * @param {number} t 시간(초) — 러닝머신 벨트처럼 계속 흐르는 부품용
+   */
+  animateEquipment(it, k, t = performance.now() / 1000) {
+    for (const a of it.anims) {
+      const o = a.obj;
+      switch (a.kind) {
+        case 'k': {
+          const kk = a.invert ? 1 - k : k;
+          o.position.set(a.base.x + a.dir[0] * a.amp * kk, a.base.y + a.dir[1] * a.amp * kk, a.base.z + a.dir[2] * a.amp * kk);
+          break;
+        }
+        case 'hide':
+          o.visible = false;
+          break;
+        case 'belt':
+          o.position.setComponent(a.axis, a.base.getComponent(a.axis) + ((t * a.speed) % a.gap));
+          break;
+        default:
+          break;
+      }
+    }
+    for (const a of it.anims) if (a.kind === 'cable') this._fitCable(a);
   }
 
   resetEquipment(it) {
-    for (const part of Object.values(it.parts)) if (part.userData.baseY !== undefined) part.position.y = part.userData.baseY;
+    for (const a of it.anims) {
+      a.obj.position.copy(a.base);
+      a.obj.visible = true;
+    }
+    for (const a of it.anims) if (a.kind === 'cable') this._fitCable(a);
+  }
+
+  /** 케이블: 도르래(top) 부터 따라가는 부품의 위치까지 늘였다 줄였다 */
+  _fitCable(a) {
+    const bottom = a.follow.position.y + a.bottomOffset;
+    const len = Math.max(0.05, a.top - bottom);
+    a.obj.position.y = bottom + len / 2;
+    a.obj.scale.y = len;
   }
 
   /** 플레이어가 바라보는 방향·사정거리·타격 위치가 모두 맞을 때만 샌드백을 타격합니다. */
@@ -411,7 +499,7 @@ export class Gym {
     target.vx += (dx / d) * impulse;
     target.vz += (dz / d) * impulse;
     target.lastHitAt = performance.now();
-    return { x: target.worldX, y: 1.85, z: target.worldZ, strength };
+    return { x: target.worldX, y: 1.0, z: target.worldZ, strength };
   }
 
   update(dt) {
@@ -431,10 +519,20 @@ export class Gym {
     const D = GYM_SIZE.depth / 2;
 
     // 10명 이상이 동시에 머물 수 있도록 휴식석을 한곳에 몰지 않고 2열로 분산합니다.
-    this._placeBench(2.6, 11.2, 10.7, 0, 'rest-bench-1');
-    this._placeBench(2.6, 15.4, 10.7, 0, 'rest-bench-2');
-    this._placeBench(2.2, 11.2, 6.7, Math.PI, 'rest-bench-3');
-    this._placeBench(2.2, 15.4, 6.7, Math.PI, 'rest-bench-4');
+    // ── 라운지: 러그 위에 소파 2개 + 1인 소파 2개가 테이블을 둘러싸 서로 마주 보고 앉음 ──
+    const LX = 12.8;
+    const LZ = 9.3;
+    this._place(createRug(2.9), LX, LZ, 0, 'rug');
+    this._place(createCoffeeTable(), LX, LZ, 0, 'coffee-table');
+    this._placeSofa(createSofa(3, '#3caea3'), LX, LZ + 1.75, Math.PI, 'lounge-sofa-1');
+    this._placeSofa(createSofa(3, '#3caea3'), LX, LZ - 1.75, 0, 'lounge-sofa-2');
+    this._placeSofa(createArmchair('#f9a03f'), LX - 2.0, LZ, Math.PI / 2, 'lounge-chair-1');
+    this._placeSofa(createArmchair('#f9a03f'), LX + 2.0, LZ, -Math.PI / 2, 'lounge-chair-2');
+    for (const [x, z] of [[LX - 2.1, LZ + 1.85], [LX + 2.1, LZ - 1.85]]) this._place(createFloorLamp(), x, z, 0, 'lamp');
+    this._buildRankingBoard(LX, 2.25, GYM_SIZE.depth / 2 - 0.04, Math.PI);
+    // 입구 쪽 대기 벤치 (앞/뒤 양쪽으로 앉기)
+    this._placeBench(2.6, -11, 13.2, 0, 'rest-bench-1');
+    this._placeBench(2.6, -7.6, 13.2, 0, 'rest-bench-2');
 
     this._place(createWaterCooler(), W - 0.65, D - 1.1, 0, 'cooler');
     this._place(createVendingMachine(), W - 0.65, 8.1, -Math.PI / 2, 'vending');
@@ -464,8 +562,8 @@ export class Gym {
     // 중앙에는 스트레칭 매트와 2개의 샌드백을 둬 대기 없이 교대로 연습할 수 있게 합니다.
     this._place(createStretchZone(), 3.6, -2.6, 0, 'stretch');
     this.punchingBags = [];
-    for (const [i, x, z] of [[1, -1.8, 3.1], [2, 2.3, 3.1]]) {
-      const bag = this._place(createPunchingBag(), x, z, 0, `bag-${i}`);
+    for (const { id, x, z } of PUNCHING_BAGS) {
+      const bag = this._place(createPunchingBag(), x, z, 0, id);
       this.punchingBags.push({
         swing: bag.swing, worldX: x, worldZ: z,
         ax: 0, az: 0, vx: 0, vz: 0, lastHitAt: 0,

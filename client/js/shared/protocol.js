@@ -1,7 +1,7 @@
 // 클라이언트 ↔ 서버 통신 규약 (양쪽이 같은 파일을 import)
 // 이벤트 이름과 값의 범위를 한곳에서 관리합니다.
 
-export const PROTOCOL_VERSION = 3;
+export const PROTOCOL_VERSION = 5;
 
 export const EV = {
   // 서버 → 클라이언트
@@ -15,6 +15,7 @@ export const EV = {
   CHAT: 'chat', // ChatMessage
   ATTACK_FX: 'attack:fx', // { id, type }  다른 사람이 공격 모션을 함
   HIT: 'hit', // { from, to, type, kx, kz, down }  누가 누구를 맞혔는지
+  WALLET: 'wallet', // { coins, items, gained?, reason? }  내 코인/보유 아이템 (벌거나 쓸 때마다)
   // 클라이언트 → 서버
   MOVE: 'move', // [x, y, z, r, actionIndex]
   ATTACK: 'attack', // 'punch' | 'kick'
@@ -25,6 +26,9 @@ export const EV = {
   CHAT_WHISPERS: 'chat:whispers', // { nickname, beforeId } → ack(ChatMessage[])
   ADMIN_ACTION: 'admin:action', // { action, target, reason?, minutes? } → ack({ ok, message })
   PING: 'net:ping', // 클라이언트 시각 → ack(같은 값)  (핑 측정)
+  SHOP_BUY: 'shop:buy', // itemId → ack({ ok, message, coins, items })
+  SHOP_SELL: 'shop:sell', // itemId → ack({ ok, message, coins, items })
+  RANKING: 'ranking', // → ack({ day, exercise:[{id,nickname,value}], bag:[...], me:{id, exercise, bag} })
 };
 
 // 접속 거부 사유 (connect_error 의 message)

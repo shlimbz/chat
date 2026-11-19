@@ -10,6 +10,9 @@ import { CharacterService, hashToken } from '../src/services/CharacterService.js
 import { ChatService, parseChatInput, cleanText, RateLimiter } from '../src/services/ChatService.js';
 import { PlayerRegistry } from '../src/game/PlayerRegistry.js';
 import { resolveAttack } from '../src/game/combat.js';
+import { EconomyService } from '../src/services/EconomyService.js';
+import { StatsService, kstDay } from '../src/services/StatsService.js';
+import { ECONOMY } from '../../client/js/shared/economy.js';
 
 const BACKENDS = {
   local: () => openDatabase({ DB_PATH: ':memory:' }),
@@ -17,11 +20,11 @@ const BACKENDS = {
 };
 
 for (const [name, makeDb] of Object.entries(BACKENDS)) {
-  test(`[${name}] 스키마 v3 생성 + 재시작 시 재실행 안 함`, async () => {
+  test(`[${name}] 스키마 v5 생성 + 재시작 시 재실행 안 함`, async () => {
     const client = name === 'turso' ? createFakeLibsqlClient() : null;
     const db = client ? await openDatabase({}, { libsqlClient: client }) : await makeDb();
     assert.equal(db.kind, name);
-    assert.equal(Number((await db.get("SELECT value FROM _meta WHERE key = 'schema_version'")).value), 3);
+    assert.equal(Number((await db.get("SELECT value FROM _meta WHERE key = 'schema_version'")).value), 5);
     if (client) {
       const before = client.calls.executeMultiple;
       await openDatabase({}, { libsqlClient: client });
@@ -59,6 +62,81 @@ for (const [name, makeDb] of Object.entries(BACKENDS)) {
 
     const admin = await accounts.register('bossadmin', 'secret123');
     assert.equal(admin.account.isAdmin, true); // ADMIN_USERNAMES (대소문자 무시)
+  });
+
+  test(`[${name}] 코인: 시작 코인, 벌기(시간당 상한), 구매/판매, 잔액 부족, 동시 구매, 관리자 지급, 저장`, async () => {
+    const db = await makeDb();
+    const accounts = new AccountService(db);
+    const { account } = await accounts.register('shopper1', 'secret123');
+    assert.equal(account.coins, ECONOMY.STARTING_COINS);
+    let now = 1000;
+    const eco = new EconomyService(db, { now: () => now });
+    const w = await eco.open(account.id);
+    assert.equal(w.coins, ECONOMY.STARTING_COINS);
+    // 벌기: 시간당 상한
+    assert.equal(eco.earn(account.id, 10), 10);
+    assert.equal(eco.earn(account.id, ECONOMY.HOURLY_CAP), ECONOMY.HOURLY_CAP - 10);
+    assert.equal(eco.earn(account.id, 1), 0);
+    now += 3600001;
+    assert.equal(eco.earn(account.id, 5), 5);
+    const total = ECONOMY.STARTING_COINS + ECONOMY.HOURLY_CAP + 5;
+    assert.equal(eco.view(account.id).coins, total);
+    // 아직 DB 에는 저장 전 → flush 후 저장
+    assert.equal((await accounts.findById(account.id)).coins, ECONOMY.STARTING_COINS);
+    await eco.flushAll();
+    assert.equal((await accounts.findById(account.id)).coins, total);
+    // 구매
+    assert.equal((await eco.buy(account.id, 'nope')).ok, false);
+    const r = await eco.buy(account.id, 'medal'); // 1500
+    assert.equal(r.ok, true);
+    assert.equal(r.coins, total - 1500);
+    assert.deepEqual(r.items, ['medal']);
+    assert.equal((await eco.buy(account.id, 'medal')).ok, false); // 중복 구매 불가
+    assert.equal((await eco.buy(account.id, 'aura_gold')).ok, false); // 4000 > 잔액
+    // 동시에 두 번 눌러도 한 번만
+    eco.earn(account.id, 0);
+    const [a1, a2] = await Promise.all([eco.buy(account.id, 'cap'), eco.buy(account.id, 'cap')]);
+    assert.equal([a1.ok, a2.ok].filter(Boolean).length, 1);
+    // 판매 (50%)
+    const s1 = await eco.sell(account.id, 'medal');
+    assert.equal(s1.ok, true);
+    assert.equal(s1.coins, total - 1500 - 300 + 750);
+    assert.equal((await eco.sell(account.id, 'medal')).ok, false);
+    // DB 와 메모리 일치
+    const row = await accounts.findById(account.id);
+    assert.equal(row.coins, s1.coins);
+    assert.deepEqual(row.items, ['cap']);
+    // 관리자 지급/회수 (0 아래로 안 내려감)
+    assert.equal(await eco.adminGive(account.id, 100), s1.coins + 100);
+    assert.equal(await eco.adminGive(account.id, -999999), 0);
+    await eco.close(account.id);
+    assert.equal((await accounts.findById(account.id)).coins, 0);
+    // 접속 안 한 계정에도 지급 가능
+    assert.equal(await eco.adminGive(account.id, 50), 50);
+  });
+
+  test(`[${name}] 오늘의 랭킹: 누적·정렬·날짜 바뀌면 초기화·내 기록`, async () => {
+    const db = await makeDb();
+    const accounts = new AccountService(db);
+    const chars = new CharacterService(db);
+    const { account } = await accounts.register('ranker01', 'secret123');
+    const ids = [];
+    for (const nick of ['가가', '나나', '다다']) ids.push((await chars.create(account.id, nick, {})).character.id);
+    let now = Date.UTC(2026, 10, 19, 3, 0); // 한국 12:00
+    const st = new StatsService(db, { now: () => now, cacheMs: 0 });
+    st.addExercise(ids[0], 30); st.addExercise(ids[1], 90); st.addBagHit(ids[2], 5); st.addBagHit(ids[0], 2);
+    await st.flush();
+    st.addExercise(ids[0], 100); // 저장 전에도 랭킹에 반영
+    const r = await st.ranking(10);
+    assert.equal(r.day, '2026-11-19');
+    assert.deepEqual(r.exercise.map((x) => [x.nickname, x.value]), [['가가', 130], ['나나', 90]]);
+    assert.deepEqual(r.bag.map((x) => [x.nickname, x.value]), [['다다', 5], ['가가', 2]]);
+    st.addBagHit(ids[1]);
+    assert.deepEqual(await st.mine(ids[1]), { exercise: 90, bag: 1 });
+    now += 15 * 3600000; // 한국 다음날 03:00
+    assert.equal(kstDay(now), '2026-11-20');
+    const r2 = await st.ranking(10);
+    assert.deepEqual(r2.exercise, []);
   });
 
   test(`[${name}] 관리자 계정 자동 생성(환경 변수) + 예약 아이디`, async () => {
@@ -178,6 +256,8 @@ test('비밀번호 해시: 원문 저장 안 함, 검증', async () => {
 });
 
 test('채팅 입력 해석 (일반 + 관리자 명령어)', () => {
+  assert.deepEqual(parseChatInput('/give 철수 500'), { kind: 'admin', action: 'give', target: '철수', amount: 500 });
+  assert.equal(parseChatInput('/give 철수').kind, 'error');
   assert.deepEqual(parseChatInput('  안녕  하세요 '), { kind: 'global', text: '안녕 하세요' });
   assert.deepEqual(parseChatInput('/w 철수 같이 운동해요'), { kind: 'whisper', target: '철수', text: '같이 운동해요' });
   assert.equal(parseChatInput('/w 철수').kind, 'error');

@@ -16,7 +16,8 @@ function rowToCharacter(row) {
     id: Number(row.id),
     accountId: row.account_id == null ? null : Number(row.account_id),
     nickname: row.nickname,
-    appearance: sanitizeAppearance(safeJson(row.appearance)),
+    // 보유 여부는 접속할 때 계정 지갑 기준으로 다시 확인합니다.
+    appearance: sanitizeAppearance(safeJson(row.appearance), { ownedItems: null }),
     bodyStats: sanitizeBodyStats(safeJson(row.body_stats)),
     level: Number(row.level),
     exp: Number(row.exp),
