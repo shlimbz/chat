@@ -16,3 +16,12 @@ export function el(tag, props = {}, children = []) {
   for (const c of children) node.append(c);
   return node;
 }
+
+/** KeyJ → J, Digit1 → 1 */
+export function keyLabel(code) {
+  if (!code) return '?';
+  if (code.startsWith('Key')) return code.slice(3);
+  if (code.startsWith('Digit')) return code.slice(5);
+  if (code.startsWith('Numpad')) return `Num${code.slice(6)}`;
+  return { Space: 'Space', ShiftLeft: 'L-Shift', ShiftRight: 'R-Shift', ControlLeft: 'L-Ctrl', ControlRight: 'R-Ctrl', AltLeft: 'L-Alt', AltRight: 'R-Alt', Semicolon: ';', Quote: "'", Comma: ',', Period: '.', BracketLeft: '[', BracketRight: ']' }[code] || code;
+}

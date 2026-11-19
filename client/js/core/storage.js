@@ -56,7 +56,13 @@ export const DEFAULT_SETTINGS = Object.freeze({
   showNameTags: true,
   showFps: false,
   sound: true,
+  autoRes: true, // 프레임이 낮으면 해상도 자동 조절
+  keys: Object.freeze({ punch: 'KeyJ', kick: 'KeyK' }), // 공격 키 (설정에서 변경)
 });
+
+// 공격 키로 쓸 수 없는 키 (이동·점프·채팅·메뉴 등)
+export const RESERVED_KEYS = new Set(['KeyW', 'KeyA', 'KeyS', 'KeyD', 'KeyE', 'Space', 'Enter', 'NumpadEnter', 'Escape', 'Slash',
+  'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'ShiftLeft', 'ShiftRight', 'Tab', 'MetaLeft', 'MetaRight']);
 
 export function loadSettings() {
   const data = read(CONFIG.STORAGE_KEY_SETTINGS) || {};
@@ -67,6 +73,13 @@ export function loadSettings() {
   if (typeof data.showNameTags === 'boolean') s.showNameTags = data.showNameTags;
   if (typeof data.showFps === 'boolean') s.showFps = data.showFps;
   if (typeof data.sound === 'boolean') s.sound = data.sound;
+  if (typeof data.autoRes === 'boolean') s.autoRes = data.autoRes;
+  const k = data.keys && typeof data.keys === 'object' ? data.keys : {};
+  const ok = (c) => typeof c === 'string' && /^[A-Za-z0-9]{2,20}$/.test(c) && !RESERVED_KEYS.has(c);
+  s.keys = {
+    punch: ok(k.punch) ? k.punch : DEFAULT_SETTINGS.keys.punch,
+    kick: ok(k.kick) && k.kick !== k.punch ? k.kick : DEFAULT_SETTINGS.keys.kick,
+  };
   return s;
 }
 

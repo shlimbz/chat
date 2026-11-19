@@ -110,7 +110,8 @@ export class PlayerRegistry {
     const dt = Math.min(2, Math.max(0.1, (now - player.lastMoveAt) / 1000));
     // 넉백 직후에는 날아가는 속도를 고려해 여유를 더 줌
     const boost = now < player.knockbackUntil ? 2 : 1;
-    const allowed = MAX_MOVE_SPEED * 1.5 * boost * dt + 0.5;
+    // +1.5m: 기구에 앉거나 내려올 때 자리로 옮겨지는 거리 허용
+    const allowed = MAX_MOVE_SPEED * 1.5 * boost * dt + 1.5;
     const dist = Math.hypot(x - player.x, z - player.z);
     player.lastMoveAt = now;
     if (dist > allowed) return 'corrected';

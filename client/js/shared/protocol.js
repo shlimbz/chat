@@ -1,7 +1,7 @@
 // 클라이언트 ↔ 서버 통신 규약 (양쪽이 같은 파일을 import)
 // 이벤트 이름과 값의 범위를 한곳에서 관리합니다.
 
-export const PROTOCOL_VERSION = 2;
+export const PROTOCOL_VERSION = 3;
 
 export const EV = {
   // 서버 → 클라이언트
@@ -24,6 +24,7 @@ export const EV = {
   CHAT_PARTNERS: 'chat:partners', // → ack([{ nickname, lastId }])
   CHAT_WHISPERS: 'chat:whispers', // { nickname, beforeId } → ack(ChatMessage[])
   ADMIN_ACTION: 'admin:action', // { action, target, reason?, minutes? } → ack({ ok, message })
+  PING: 'net:ping', // 클라이언트 시각 → ack(같은 값)  (핑 측정)
 };
 
 // 접속 거부 사유 (connect_error 의 message)
@@ -43,8 +44,8 @@ export const AUTH_ERROR_TEXT = {
   BAD_VERSION: '게임 버전이 서버와 다릅니다. 새로고침(Ctrl+Shift+R) 해주세요.',
 };
 
-// 동작 상태 → 숫자로 전송해 데이터량 절감
-export const ACTIONS = ['idle', 'walk', 'run', 'jump'];
+// 동작 상태 → 숫자로 전송해 데이터량 절감 (앉기·기구 운동 포함)
+export const ACTIONS = ['idle', 'walk', 'run', 'jump', 'sit', 'ex_tread', 'ex_bench', 'ex_curl', 'ex_legpress', 'ex_shoulder', 'ex_lat'];
 export const actionToIndex = (a) => Math.max(0, ACTIONS.indexOf(a));
 export const indexToAction = (i) => ACTIONS[i] || 'idle';
 

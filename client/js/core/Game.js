@@ -16,11 +16,12 @@ import { HUD } from '../ui/HUD.js';
 import { Menu } from '../ui/Menu.js';
 import { ChatPanel } from '../ui/ChatPanel.js';
 import { TouchControls, isMobile } from '../ui/mobile.js';
+import { keyLabel } from '../ui/dom.js';
 import { RemotePlayers } from '../net/RemotePlayers.js';
-import { saveProfile, saveSettings, QUALITY_PRESETS } from './storage.js';
+import { saveProfile, saveSettings, QUALITY_PRESETS, DEFAULT_SETTINGS } from './storage.js';
 import { EQUIPMENT_TYPES } from '../shared/equipmentTypes.js';
 import {
-  EV, CLIENT_SEND_HZ, AUTH_ERROR_TEXT, ATTACKS, KNOCKDOWN,
+  EV, CLIENT_SEND_HZ, AUTH_ERROR_TEXT, ATTACKS, KNOCKDOWN, CHAT_TYPES,
 } from '../shared/protocol.js';
 
 export class Game {
@@ -49,6 +50,10 @@ export class Game {
     this._sendTimer = 0;
     this._lastSent = '';
     this._frameCount = 0;
+    this._attackKeyOff = [];
+    this._animatedEquip = new Set(); // 지금 움직이고 있는 기구 부품
+    this.ping = null;
+    this._autoRes = { frames: 0, time: 0, good: 0, pr: 1, max: 1 };
 
     // 렌더러
     const renderer = new THREE.WebGLRenderer({ antialias: !this.mobile, powerPreference: 'high-performance' });
@@ -121,10 +126,8 @@ export class Game {
 
     this.applySettings(settings);
 
-    // 키 바인딩
+    // 키 바인딩 (공격 키는 설정에서 바꿀 수 있음 → applySettings 에서 등록)
     this.input.onPress('KeyE', () => this._interact());
-    this.input.onPress('KeyF', () => this.attack('punch'));
-    this.input.onPress('KeyG', () => this.attack('kick'));
     this.input.onPress('Escape', () => this._escape());
     this.input.onPress('Enter', (e) => this._openChat(e, ''));
     this.input.onPress('NumpadEnter', (e) => this._openChat(e, ''));
@@ -152,12 +155,31 @@ export class Game {
     this.minigames.set(type, module);
   }
 
-  /** 주먹 / 발차기 (키보드 F·G, 모바일 버튼) */
+  /** 주먹 / 발차기 (키보드 J·K 기본, 모바일 버튼) */
   attack(type) {
     if (!this.input.enabled || this.chat.isFocused()) return;
     if (!this.player.tryAttack(type)) return;
     this.sfx.swing();
     this.network?.sendAttack(type);
+    this._bagCheck(this.player.position, this.player.rotY);
+  }
+
+  /** 공격 방향 앞에 샌드백이 있으면 흔들기 */
+  _bagCheck(pos, rotY) {
+    const hx = pos.x + Math.sin(rotY) * 0.8;
+    const hz = pos.z + Math.cos(rotY) * 0.8;
+    this.gym.hitBag(hx, hz, pos.x, pos.z);
+  }
+
+  _bindAttackKeys() {
+    for (const off of this._attackKeyOff) off();
+    const keys = { ...DEFAULT_SETTINGS.keys, ...(this.settings.keys || {}) };
+    this._attackKeyOff = [
+      this.input.onPress(keys.punch, () => this.attack('punch')),
+      this.input.onPress(keys.kick, () => this.attack('kick')),
+    ];
+    this.input.extraGameKeys = new Set([keys.punch, keys.kick]);
+    this.hud.setAttackKeys(keyLabel(keys.punch), keyLabel(keys.kick));
   }
 
   applySettings(s) {
@@ -167,10 +189,14 @@ export class Game {
     this.cameraCtl.invertY = this.settings.invertY;
     this.sfx.enabled = this.settings.sound !== false;
 
+    this._bindAttackKeys();
+
     const q = QUALITY_PRESETS[this.settings.quality] || QUALITY_PRESETS.medium;
     const dpr = window.devicePixelRatio || 1;
     // 고해상도(레티나) 화면에서도 "보통" 이하는 1배 이하로 그려 픽셀 처리량을 줄임
     const pixelRatio = q.pixelRatio > 1 ? Math.min(dpr, CONFIG.MAX_PIXEL_RATIO) : Math.min(dpr, q.pixelRatio);
+    this._autoRes.max = pixelRatio;
+    this._autoRes.pr = pixelRatio;
     this.renderer.setPixelRatio(pixelRatio);
     if (this.renderer.shadowMap.enabled !== q.shadows) {
       this.renderer.shadowMap.enabled = q.shadows;
@@ -222,13 +248,27 @@ export class Game {
     });
     net.on(EV.PLAYER_APPEARANCE, ({ id, appearance }) => this.remotePlayers.setAppearance(id, appearance));
     net.on(EV.CORRECT, ({ x, y, z }) => this.player.teleport(x, z, this.player.rotY, y));
-    net.on(EV.CHAT, (msg) => this.chat.addMessage(msg));
+    net.on(EV.CHAT, (msg) => {
+      this.chat.addMessage(msg);
+      // 전체 채팅은 말한 캐릭터 머리 위에 말풍선 (귓속말은 표시 안 함)
+      if (msg.type === CHAT_TYPES.GLOBAL && msg.from) {
+        const model = msg.from === this.profile.nickname ? this.playerModel : this.remotePlayers.findByNickname(msg.from)?.model;
+        model?.say(msg.text);
+      }
+    });
     net.on(EV.ATTACK_FX, ({ id, type }) => {
       const p = this.remotePlayers.get(id);
       if (!p) return;
       p.model.playAttack(type);
       if (this._near(p.pos, 10)) this.sfx.swing();
+      this._bagCheck(p.pos, p.rot);
     });
+    // 핑(왕복 지연) 측정 — 설정의 "FPS 표시"에 함께 표시
+    clearInterval(this._pingTimer);
+    this._pingTimer = setInterval(async () => {
+      if (!net.connected || !this.settings.showFps) return;
+      try { this.ping = await net.ping(); } catch { this.ping = null; }
+    }, 3000);
     net.on(EV.HIT, (h) => this._onHit(h));
 
     // 재접속 성공 → 전체 상태 다시 맞추기
@@ -358,6 +398,10 @@ export class Game {
       this.chat.setExpanded(false);
       return;
     }
+    if (this.player.activity) {
+      this.player.stopActivity();
+      return;
+    }
     // Phase 4: 운동 중이면 여기서 운동 종료를 먼저 처리
     if (this.menu.isOpen()) {
       this.menu.back();
@@ -367,17 +411,78 @@ export class Game {
     }
   }
 
+  /** E: 기구 운동 / 벤치 앉기 시작 — 다시 누르면 그만하기 */
   _interact() {
-    if (!this.input.enabled || !this.nearby) return;
-    const eq = this.nearby;
-    const mg = this.minigames.get(eq.type);
-    if (mg) {
-      mg.start?.(this, eq);
+    if (!this.input.enabled || this.chat.isFocused()) return;
+    if (this.player.activity) {
+      this.player.stopActivity();
       return;
     }
-    const info = EQUIPMENT_TYPES[eq.type];
-    const when = info.minigamePhase ? `Phase ${info.minigamePhase}에서 추가됩니다` : '이후 업데이트에서 추가될 예정입니다';
-    this.hud.toast(`${eq.label} 미니게임은 아직 없습니다 — ${when}.`);
+    const eq = this.nearby;
+    if (!eq || this.player.isDown || !this.player.grounded) return;
+    if (this._occupant(eq)) {
+      this.hud.toast(`다른 사람이 ${eq.type === 'seat' ? '앉아 있어요' : '사용 중이에요'}.`);
+      return;
+    }
+    this.player.startActivity(eq);
+    // Phase 4: 미니게임이 등록된 기구면 함께 시작
+    this.minigames.get(eq.type)?.start?.(this, eq);
+  }
+
+  /** 그 자리에서 운동/앉기 중인 다른 사람 */
+  _occupant(it) {
+    for (const p of this.remotePlayers.list()) {
+      if (p.model.exercise && Math.hypot(p.pos.x - it.spot.x, p.pos.z - it.spot.z) < 0.45) return p;
+    }
+    return null;
+  }
+
+  /** 운동하는 사람(나 + 다른 사람)에 맞춰 바벨·랫풀다운 바 움직이기 */
+  _animateEquipment() {
+    const active = new Set();
+    const apply = (it, k) => { this.gym.animateEquipment(it, k); active.add(it); };
+    const mine = this.player.activity?.it;
+    if (mine) apply(mine, this.playerModel.exerciseK);
+    for (const p of this.remotePlayers.list()) {
+      if (!p.model.exercise || p.model.exercise === 'sit') continue;
+      const it = this._spotAt(p.pos);
+      if (it) apply(it, p.model.exerciseK);
+    }
+    for (const it of this._animatedEquip) if (!active.has(it)) this.gym.resetEquipment(it);
+    this._animatedEquip = active;
+  }
+
+  _spotAt(pos) {
+    for (const it of this.gym.interactables) {
+      if (it.type !== 'seat' && Math.hypot(pos.x - it.spot.x, pos.z - it.spot.z) < 0.4) return it;
+    }
+    return null;
+  }
+
+  /** 프레임이 계속 낮으면 해상도를 조금씩 낮추고, 여유가 생기면 다시 올림 */
+  _autoResolution(rawDt) {
+    const a = this._autoRes;
+    if (this.settings.autoRes === false || this.chatMode) return;
+    a.frames++;
+    a.time += rawDt;
+    if (a.time < 2) return;
+    const fps = a.frames / a.time;
+    a.frames = 0;
+    a.time = 0;
+    if (fps < 42 && a.pr > 0.55) {
+      a.pr = Math.max(0.55, a.pr - 0.1);
+      a.good = 0;
+      this.renderer.setPixelRatio(a.pr);
+    } else if (fps > 57 && a.pr < a.max) {
+      a.good++;
+      if (a.good >= 3) {
+        a.pr = Math.min(a.max, a.pr + 0.1);
+        a.good = 0;
+        this.renderer.setPixelRatio(a.pr);
+      }
+    } else {
+      a.good = 0;
+    }
   }
 
   _zoneName(x, z) {
@@ -400,22 +505,29 @@ export class Game {
     this._fps.time += rawDt;
     if (this._fps.time >= 0.5) {
       const info = this.renderer.info.render;
-      this.hud.setFps(this._fps.frames / this._fps.time, info.calls, info.triangles);
+      this.hud.setFps(this._fps.frames / this._fps.time, info.calls, info.triangles, this.network ? this.ping : undefined, this._autoRes.pr);
       this._fps.frames = 0;
       this._fps.time = 0;
     }
 
+    this._autoResolution(rawDt);
     this.player.update(dt);
     this.remotePlayers.update(dt);
     this.effects.update(dt);
+    this.gym.update(dt);
+    this._animateEquipment();
     this.cameraCtl.update(dt, this.player.position);
     this._sendState(dt);
 
     // 상호작용 대상 탐색
     const p = this.player.position;
-    this.nearby = this.input.enabled && !this.chat.isFocused() ? this.gym.findNearestInteractable(p.x, p.z, CONFIG.INTERACT_RANGE) : null;
-    this.hud.setPrompt(this.nearby && !this.mobile ? `<kbd>E</kbd> ${this.nearby.label} 이용하기` : '');
-    this.touch?.setUseVisible(!!this.nearby, this.nearby ? this.nearby.label : '');
+    const act = this.player.activity;
+    this.nearby = this.input.enabled && !act && !this.chat.isFocused() ? this.gym.findNearestInteractable(p.x, p.z, CONFIG.INTERACT_RANGE) : null;
+    let prompt = '';
+    if (act) prompt = act.it.type === 'seat' ? '일어나기' : `${act.it.label} 그만하기`;
+    else if (this.nearby) prompt = this.nearby.type === 'seat' ? '앉기' : `${this.nearby.label} 운동하기`;
+    this.hud.setPrompt(prompt && !this.mobile ? `<kbd>E</kbd> ${prompt}` : '');
+    this.touch?.setUseVisible(!!prompt, prompt);
     this.hud.setState(this.playerModel.action, this.player.speed, this._zoneName(p.x, p.z));
 
     // 채팅 모드에서는 4프레임에 1번만 그림 (배터리 절약, 네트워크/채팅은 그대로 동작)

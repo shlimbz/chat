@@ -21,19 +21,35 @@ test('닉네임 검증', () => {
 });
 
 test('외형 값 검증: 허용되지 않은 값은 기본값으로', () => {
-  const out = sanitizeAppearance({ body: 'female', skin: '#123456', hair: 'mohawk', outfit: 'tracksuit', extra: 'x' });
-  assert.equal(out.body, 'female');
+  const out = sanitizeAppearance({ gender: 'female', skin: '#123456', hair: 'evil', outfit: 'tracksuit', muscle: 5, weight: -1, height: '0.73', extra: 'x' });
+  assert.equal(out.gender, 'female');
   assert.equal(out.skin, DEFAULT_APPEARANCE.skin);
   assert.equal(out.hair, DEFAULT_APPEARANCE.hair);
   assert.equal(out.outfit, 'tracksuit');
+  assert.equal(out.muscle, 1);
+  assert.equal(out.weight, 0);
+  assert.equal(out.height, 0.75); // 0.05 단위
   assert.equal('extra' in out, false);
-  assert.deepEqual(sanitizeAppearance(null), { ...DEFAULT_APPEARANCE });
+  const def = sanitizeAppearance(null);
+  assert.equal(def.gender, 'male');
+  assert.deepEqual(def.acc, {});
+});
+
+test('외형: 예전 체형 데이터 호환, 악세사리는 보유한 것만', () => {
+  const old = sanitizeAppearance({ body: 'stocky', hair: 'bun' });
+  assert.equal(old.gender, 'male');
+  assert.equal(old.muscle, 0.75);
+  assert.equal(sanitizeAppearance({ body: 'female' }).gender, 'female');
+  const acc = { hat: 'cap', eyes: 'sunglasses', neck: 'cap' };
+  assert.deepEqual(sanitizeAppearance({ acc }).acc, {}); // 보유 없음 → 제거
+  assert.deepEqual(sanitizeAppearance({ acc }, { ownedItems: ['cap', 'sunglasses'] }).acc, { hat: 'cap', eyes: 'sunglasses' }); // 슬롯 불일치 제거
 });
 
 test('랜덤 외형은 항상 유효', () => {
   for (let i = 0; i < 200; i++) {
     const a = randomAppearance();
     for (const [k, allowed] of Object.entries(APPEARANCE_FIELDS)) assert.ok(allowed.includes(a[k]), k);
+    assert.ok(a.muscle >= 0 && a.muscle <= 1);
   }
 });
 

@@ -21,7 +21,22 @@ import { MAX_CHARACTERS } from '../../client/js/shared/protocol.js';
 
 export async function createGameServer(config, { log = console.log, libsqlClient } = {}) {
   const db = await openDatabase(config, { libsqlClient });
-  const accounts = new AccountService(db, { adminUsernames: config.ADMIN_USERNAMES });
+  const adminNames = [...config.ADMIN_USERNAMES, ...(config.ADMIN_USERNAME ? [config.ADMIN_USERNAME] : [])];
+  const accounts = new AccountService(db, {
+    adminUsernames: adminNames,
+    reservedUsernames: config.ADMIN_USERNAME ? [config.ADMIN_USERNAME] : [],
+  });
+  if (config.ADMIN_USERNAME || config.ADMIN_PASSWORD) {
+    const r = config.ADMIN_USERNAME && config.ADMIN_PASSWORD
+      ? await accounts.ensureAdmin(config.ADMIN_USERNAME, config.ADMIN_PASSWORD)
+      : { ok: false, error: 'ADMIN_USERNAME 과 ADMIN_PASSWORD 를 둘 다 설정해야 합니다.' };
+    log(r.ok ? `[admin] 관리자 계정 ${r.created ? '생성' : '확인'}: ${config.ADMIN_USERNAME}` : `[admin] 관리자 계정 설정 실패 — ${r.error}`);
+  }
+  // 만료된 세션 정리 (시작 시 + 6시간마다)
+  const cleanup = () => accounts.cleanupSessions().catch((err) => log('[db] 세션 정리 실패', err));
+  cleanup();
+  const cleanupTimer = setInterval(cleanup, 6 * 3600 * 1000);
+  cleanupTimer.unref?.();
   const characters = new CharacterService(db);
   const chat = new ChatService(db);
   // 로그인/가입 시도 제한 (비밀번호 무차별 대입 방지): IP 당 10분에 20회
@@ -179,6 +194,7 @@ export async function createGameServer(config, { log = console.log, libsqlClient
       return new Promise((resolve) => httpServer.listen(port, () => resolve(httpServer.address().port)));
     },
     async close() {
+      clearInterval(cleanupTimer);
       await game.stop();
       await new Promise((resolve) => io.close(() => resolve()));
       await db.close();

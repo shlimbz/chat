@@ -182,6 +182,9 @@ export function attachGameHandlers(io, { config, accounts, characters, chat, log
       if (res === 'corrected') socket.emit(EV.CORRECT, { x: p.x, y: p.y, z: p.z });
     });
 
+    // ── 핑 측정 ──────────────────────────────────────
+    socket.on(EV.PING, (t, ack) => { if (typeof ack === 'function') ack(t); });
+
     // ── 공격 ─────────────────────────────────────────
     socket.on(EV.ATTACK, (type) => {
       const p = registry.get(socket.id);
@@ -198,9 +201,9 @@ export function attachGameHandlers(io, { config, accounts, characters, chat, log
     socket.on(EV.SET_APPEARANCE, (appearance) => {
       const p = registry.get(socket.id);
       if (!p) return;
-      p.appearance = sanitizeAppearance(appearance);
+      p.appearance = sanitizeAppearance(appearance, { ownedItems: account.items || [] });
       socket.broadcast.emit(EV.PLAYER_APPEARANCE, { id: p.id, appearance: p.appearance });
-      characters.updateAppearance(p.id, p.appearance).catch((err) => log('[db] 외형 저장 실패', err));
+      characters.updateAppearance(p.id, p.appearance, account.items || []).catch((err) => log('[db] 외형 저장 실패', err));
     });
 
     // ── 채팅 ─────────────────────────────────────────

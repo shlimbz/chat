@@ -17,11 +17,11 @@ const BACKENDS = {
 };
 
 for (const [name, makeDb] of Object.entries(BACKENDS)) {
-  test(`[${name}] 스키마 v2 생성 + 재시작 시 재실행 안 함`, async () => {
+  test(`[${name}] 스키마 v3 생성 + 재시작 시 재실행 안 함`, async () => {
     const client = name === 'turso' ? createFakeLibsqlClient() : null;
     const db = client ? await openDatabase({}, { libsqlClient: client }) : await makeDb();
     assert.equal(db.kind, name);
-    assert.equal(Number((await db.get("SELECT value FROM _meta WHERE key = 'schema_version'")).value), 2);
+    assert.equal(Number((await db.get("SELECT value FROM _meta WHERE key = 'schema_version'")).value), 3);
     if (client) {
       const before = client.calls.executeMultiple;
       await openDatabase({}, { libsqlClient: client });
@@ -61,6 +61,24 @@ for (const [name, makeDb] of Object.entries(BACKENDS)) {
     assert.equal(admin.account.isAdmin, true); // ADMIN_USERNAMES (대소문자 무시)
   });
 
+  test(`[${name}] 관리자 계정 자동 생성(환경 변수) + 예약 아이디`, async () => {
+    const accounts = new AccountService(await makeDb(), { adminUsernames: ['ADMING'], reservedUsernames: ['ADMING'] });
+    // 일반 가입으로는 관리자 아이디를 먼저 차지할 수 없음
+    assert.equal((await accounts.register('adming', 'hacker123')).ok, false);
+    assert.equal((await accounts.ensureAdmin('ADMING', 'dlrjamld')).created, true);
+    const l = await accounts.login('ADMING', 'dlrjamld');
+    assert.equal(l.ok, true);
+    assert.equal(l.account.isAdmin, true);
+    assert.equal(l.account.coins, 0);
+    assert.deepEqual(l.account.items, []);
+    // 비밀번호를 바꾸면 재시작 시 새 비밀번호로 맞춰짐
+    assert.equal((await accounts.ensureAdmin('ADMING', 'newpass99')).created, false);
+    assert.equal((await accounts.login('ADMING', 'dlrjamld')).ok, false);
+    assert.equal((await accounts.login('ADMING', 'newpass99')).ok, true);
+    assert.equal((await accounts.ensureAdmin('ADMING', '123')).ok, false); // 너무 짧은 비밀번호
+    assert.equal(await accounts.cleanupSessions(), 0);
+  });
+
   test(`[${name}] 캐릭터: 계정당 3개, 소유 확인, 삭제 후 닉네임 재사용, 예전 캐릭터 가져오기`, async () => {
     const db = await makeDb();
     const accounts = new AccountService(db);
@@ -68,9 +86,10 @@ for (const [name, makeDb] of Object.entries(BACKENDS)) {
     const a = (await accounts.register('user_a', 'secret123')).account;
     const b = (await accounts.register('user_b', 'secret123')).account;
 
-    const c1 = await characters.create(a.id, '헬린이', { body: 'female' });
+    const c1 = await characters.create(a.id, '헬린이', { gender: 'female', muscle: 0.8 });
     assert.equal(c1.ok, true);
-    assert.equal(c1.character.appearance.body, 'female');
+    assert.equal(c1.character.appearance.gender, 'female');
+    assert.equal(c1.character.appearance.muscle, 0.8);
     assert.equal((await characters.create(b.id, '헬린이', {})).ok, false); // 닉네임 중복
     await characters.create(a.id, '둘째', {});
     await characters.create(a.id, '셋째', {});

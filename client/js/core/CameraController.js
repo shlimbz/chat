@@ -87,11 +87,17 @@ export class CameraController {
 
   /** 카메라가 바라보는 수평 전방 벡터 (이동 방향 계산용) */
   getForward() {
-    return { x: -Math.sin(this.yaw), z: -Math.cos(this.yaw) };
+    const f = this._fwd || (this._fwd = { x: 0, z: 0 });
+    f.x = -Math.sin(this.yaw);
+    f.z = -Math.cos(this.yaw);
+    return f;
   }
 
   getRight() {
-    return { x: Math.cos(this.yaw), z: -Math.sin(this.yaw) };
+    const r = this._right || (this._right = { x: 0, z: 0 });
+    r.x = Math.cos(this.yaw);
+    r.z = -Math.sin(this.yaw);
+    return r;
   }
 
   /** 대상 뒤로 카메라를 즉시 정렬 */

@@ -1,6 +1,7 @@
 // ESC 메뉴 + 설정 화면
 // 아직 구현되지 않은 메뉴는 "Phase N 예정" 으로 비활성 표시합니다.
-import { el } from './dom.js';
+import { el, keyLabel } from './dom.js';
+import { RESERVED_KEYS, DEFAULT_SETTINGS } from '../core/storage.js';
 
 export class Menu {
   /**
@@ -205,6 +206,10 @@ export class Menu {
     this.nameTagInput = el('input', { attrs: { type: 'checkbox' } });
     this.fpsInput = el('input', { attrs: { type: 'checkbox' } });
     this.soundInput = el('input', { attrs: { type: 'checkbox' } });
+    this.autoResInput = el('input', { attrs: { type: 'checkbox' } });
+    this.keys = { ...DEFAULT_SETTINGS.keys };
+    this.keyBtns = {};
+    this.keyMsg = el('div', { class: 'menu-hint' });
     this.quality = 'medium';
 
     const emit = () => {
@@ -215,11 +220,14 @@ export class Menu {
         showNameTags: this.nameTagInput.checked,
         showFps: this.fpsInput.checked,
         sound: this.soundInput.checked,
+        autoRes: this.autoResInput.checked,
+        keys: { ...this.keys },
       };
       this.sensValue.textContent = `${s.mouseSensitivity.toFixed(1)}x`;
       this.h.onSettingsChange?.(s);
     };
-    for (const input of [this.sensInput, this.invertInput, this.nameTagInput, this.fpsInput, this.soundInput]) {
+    this._emitSettings = emit;
+    for (const input of [this.sensInput, this.invertInput, this.nameTagInput, this.fpsInput, this.soundInput, this.autoResInput]) {
       input.addEventListener('input', emit);
     }
 
@@ -238,10 +246,52 @@ export class Menu {
       el('label', { class: 'menu-row' }, [el('span', { text: '마우스 감도' }), this.sensInput, this.sensValue]),
       el('label', { class: 'menu-row' }, [el('span', { text: '카메라 상하 반전' }), this.invertInput]),
       el('label', { class: 'menu-row' }, [el('span', { text: '닉네임 표시' }), this.nameTagInput]),
+      el('label', { class: 'menu-row' }, [el('span', { text: '해상도 자동 조절 (버벅이면 자동으로 낮춤)' }), this.autoResInput]),
+      el('div', { class: 'menu-row' }, [el('span', { text: '주먹 키' }), this._keyButton('punch')]),
+      el('div', { class: 'menu-row' }, [el('span', { text: '발차기 키' }), this._keyButton('kick')]),
+      this.keyMsg,
       el('label', { class: 'menu-row' }, [el('span', { text: '효과음' }), this.soundInput]),
       el('label', { class: 'menu-row' }, [el('span', { text: 'FPS 표시' }), this.fpsInput]),
       el('button', { class: 'menu-btn', attrs: { type: 'button' }, text: '← 돌아가기', on: { click: () => this._show('main') } }),
     ]);
+  }
+
+  /** 키 변경 버튼: 누른 뒤 원하는 키를 누르면 바뀜 */
+  _keyButton(action) {
+    const b = el('button', { class: 'chip key-chip', attrs: { type: 'button' } });
+    b.addEventListener('click', () => {
+      if (this._capturing) return;
+      this._capturing = action;
+      b.textContent = '키를 누르세요…';
+      b.classList.add('selected');
+      this.keyMsg.textContent = '';
+      const onKey = (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        window.removeEventListener('keydown', onKey, true);
+        this._capturing = null;
+        b.classList.remove('selected');
+        const other = action === 'punch' ? 'kick' : 'punch';
+        if (e.code === 'Escape') {
+          this._syncKeys();
+        } else if (RESERVED_KEYS.has(e.code)) {
+          this.keyMsg.textContent = `${keyLabel(e.code)} 키는 이동·점프·채팅 등에 쓰여서 사용할 수 없어요.`;
+        } else if (e.code === this.keys[other]) {
+          this.keyMsg.textContent = '두 공격에 같은 키를 쓸 수 없어요.';
+        } else {
+          this.keys[action] = e.code;
+          this._emitSettings?.();
+        }
+        this._syncKeys();
+      };
+      window.addEventListener('keydown', onKey, true);
+    });
+    this.keyBtns[action] = b;
+    return b;
+  }
+
+  _syncKeys() {
+    for (const [a, b] of Object.entries(this.keyBtns)) b.textContent = keyLabel(this.keys[a]);
   }
 
   _syncQuality() {
@@ -256,6 +306,9 @@ export class Menu {
     this.nameTagInput.checked = s.showNameTags;
     this.fpsInput.checked = s.showFps;
     this.soundInput.checked = s.sound !== false;
+    this.autoResInput.checked = s.autoRes !== false;
+    this.keys = { ...DEFAULT_SETTINGS.keys, ...(s.keys || {}) };
+    this._syncKeys();
     this.quality = s.quality;
     this._syncQuality();
   }

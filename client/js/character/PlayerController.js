@@ -29,6 +29,9 @@ export class PlayerController {
     this.downUntil = 0; // 기절(넘어짐) 끝나는 시각
     this._attackReadyAt = { punch: 0, kick: 0 };
     this._attackBusyUntil = 0;
+    this.activity = null; // 앉기·기구 운동 중이면 { it(상호작용 대상), type }
+    // 매 프레임 새 객체를 만들지 않도록 재사용 (가비지 컬렉션 줄이기)
+    this._zeroAxis = { x: 0, y: 0 };
 
     input.onPress('Space', () => this.requestJump());
   }
@@ -40,6 +43,31 @@ export class PlayerController {
 
   get isDown() {
     return performance.now() < this.downUntil;
+  }
+
+  /** 기구 운동 / 벤치 앉기 시작: 정해진 자리로 이동해 자세 잡기 */
+  startActivity(it) {
+    this.activity = { it, type: it.exercise };
+    const sp = it.spot;
+    this.position.x = sp.x;
+    this.position.z = sp.z;
+    this.position.y = sp.y;
+    this.rotY = sp.r;
+    this.velocity.x = this.velocity.z = 0;
+    this.knock.x = this.knock.z = 0;
+    this.vy = 0;
+    this.grounded = true;
+    this.model.setExercise(it.exercise);
+    this._syncModel();
+  }
+
+  /** 운동/앉기 종료: 기구 앞(상호작용 지점)으로 내려옴 */
+  stopActivity() {
+    const a = this.activity;
+    if (!a) return;
+    this.activity = null;
+    this.model.setExercise(null);
+    this.teleport(a.it.x, a.it.z, this.rotY + 0);
   }
 
   teleport(x, z, rotY = this.rotY, y = 0) {
@@ -65,7 +93,7 @@ export class PlayerController {
   tryAttack(type) {
     const spec = ATTACKS[type];
     const now = performance.now();
-    if (!spec || this.locked || this.isDown || !this.input.enabled) return false;
+    if (!spec || this.locked || this.isDown || this.activity || !this.input.enabled) return false;
     if (now < this._attackReadyAt[type] || now < this._attackBusyUntil) return false;
     this._attackReadyAt[type] = now + spec.cooldownMs;
     this._attackBusyUntil = now + spec.durationMs * 0.7;
@@ -75,6 +103,7 @@ export class PlayerController {
 
   /** 서버가 "맞았다" 고 알려줬을 때 */
   applyHit(kx, kz, lift, down, downMs) {
+    if (this.activity) this.stopActivity(); // 맞으면 운동하다가도 튕겨 나옴
     this.knock.x = kx;
     this.knock.z = kz;
     this.vy = Math.max(this.vy, lift);
@@ -87,8 +116,15 @@ export class PlayerController {
   }
 
   update(dt) {
+    if (this.activity) {
+      // 운동/앉기 중에는 제자리 (물리 계산 생략)
+      this.speed = 0;
+      this._syncModel();
+      this.model.update(dt, 0, false);
+      return;
+    }
     const down = this.isDown;
-    const axis = this.locked || down ? { x: 0, y: 0 } : this.input.getMoveAxis();
+    const axis = this.locked || down ? this._zeroAxis : this.input.getMoveAxis();
     const f = this.camera.getForward();
     const r = this.camera.getRight();
     let mx = f.x * axis.y + r.x * axis.x;

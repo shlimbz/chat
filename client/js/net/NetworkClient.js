@@ -122,6 +122,13 @@ export class NetworkClient {
     if (this.connected) this.socket.emit(EV.ATTACK, type);
   }
 
+  /** 서버 왕복 시간(ms) */
+  async ping() {
+    const t = performance.now();
+    await this.request(EV.PING, Date.now(), 3000);
+    return Math.round(performance.now() - t);
+  }
+
   /** 관리자 명령 → { ok, message } */
   admin(action, target, extra = {}) {
     return this.request(EV.ADMIN_ACTION, { action, target, ...extra });

@@ -26,14 +26,53 @@ export async function verifyPassword(password, stored) {
   return crypto.timingSafeEqual(key, expected);
 }
 
+function parseItems(s) {
+  try {
+    const v = JSON.parse(s || '[]');
+    return Array.isArray(v) ? v.filter((x) => typeof x === 'string') : [];
+  } catch {
+    return [];
+  }
+}
+
 export class AccountService {
   /**
    * @param {object} db
    * @param {{adminUsernames?: string[]}} opts
    */
-  constructor(db, { adminUsernames = [] } = {}) {
+  constructor(db, { adminUsernames = [], reservedUsernames = [] } = {}) {
     this.db = db;
     this.admins = new Set(adminUsernames.map((u) => u.toLowerCase()));
+    // 일반 가입으로는 만들 수 없는 아이디 (환경 변수로 만드는 관리자 계정)
+    this.reserved = new Set(reservedUsernames.map((u) => u.toLowerCase()));
+  }
+
+  /**
+   * 관리자 계정 준비: 없으면 만들고, 있으면 비밀번호·권한을 환경 변수 값으로 맞춤
+   * @returns {Promise<{ok:boolean, created?:boolean, error?:string}>}
+   */
+  async ensureAdmin(username, password) {
+    const u = validateUsername(username);
+    if (!u.ok) return { ok: false, error: `ADMIN_USERNAME: ${u.error}` };
+    const p = validatePassword(password);
+    if (!p.ok) return { ok: false, error: `ADMIN_PASSWORD: ${p.error}` };
+    const hash = await hashPassword(password);
+    const row = await this.db.get('SELECT id FROM accounts WHERE username = ?', [u.value]);
+    if (row) {
+      await this.db.run("UPDATE accounts SET password_hash = ?, role = 'admin', banned = 0, ban_reason = NULL WHERE id = ?", [hash, row.id]);
+      return { ok: true, created: false };
+    }
+    await this.db.run(
+      "INSERT INTO accounts (username, password_hash, role, created_at) VALUES (?, ?, 'admin', ?)",
+      [u.value, hash, Date.now()],
+    );
+    return { ok: true, created: true };
+  }
+
+  /** 만료된 로그인 세션 정리 */
+  async cleanupSessions() {
+    const r = await this.db.run('DELETE FROM sessions WHERE expires_at < ?', [Date.now()]);
+    return r.changes;
   }
 
   _toAccount(row) {
@@ -44,6 +83,8 @@ export class AccountService {
       isAdmin: row.role === 'admin' || this.admins.has(String(row.username).toLowerCase()),
       banned: Number(row.banned) === 1,
       banReason: row.ban_reason || null,
+      coins: Number(row.coins ?? 0),
+      items: parseItems(row.items),
     };
   }
 
@@ -62,6 +103,7 @@ export class AccountService {
     if (!u.ok) return { ok: false, error: u.error };
     const p = validatePassword(password);
     if (!p.ok) return { ok: false, error: p.error };
+    if (this.reserved.has(u.value.toLowerCase())) return { ok: false, error: '사용할 수 없는 아이디입니다.' };
     if (await this.db.get('SELECT id FROM accounts WHERE username = ?', [u.value])) {
       return { ok: false, error: '이미 사용 중인 아이디입니다.' };
     }

@@ -2,13 +2,14 @@
 import { el } from './dom.js';
 import { getCharacterPreview } from './CharacterPreview.js';
 import {
-  BODY_PRESETS, SKIN_COLORS, HAIR_STYLES, HAIR_COLORS, FACE_SHAPES, OUTFITS, CLOTH_COLORS, SHOES, SHOE_COLORS,
+  GENDERS, BODY_PRESETS, BODY_SLIDERS, SKIN_COLORS, HAIR_STYLES, HAIR_COLORS, FACE_SHAPES, OUTFITS, CLOTH_COLORS, SHOES, SHOE_COLORS,
   DEFAULT_APPEARANCE, sanitizeAppearance, randomAppearance, validateNickname, NICKNAME_MAX,
 } from '../shared/appearance.js';
 
 // 화면에 표시할 옵션 그룹 정의
 const SECTIONS = [
-  { key: 'body', title: '체형', kind: 'chips', options: BODY_PRESETS },
+  { key: 'gender', title: '성별', kind: 'chips', options: GENDERS },
+  { key: 'body', title: '체형 (빠른 선택 + 세부 조절)', kind: 'body' },
   { key: 'skin', title: '피부색', kind: 'colors', options: SKIN_COLORS },
   { key: 'face', title: '얼굴 형태', kind: 'chips', options: FACE_SHAPES },
   { key: 'hair', title: '헤어스타일', kind: 'chips', options: HAIR_STYLES },
@@ -86,7 +87,9 @@ export class CharacterCreator {
     this.errorEl = el('div', { class: 'creator-error' });
 
     this.sectionEls = {};
+    this.sliders = {};
     const sections = SECTIONS.map((sec) => {
+      if (sec.kind === 'body') return this._buildBodySection(sec);
       const list = el('div', { class: sec.kind === 'colors' ? 'swatches' : 'chips' });
       for (const opt of sec.options) {
         const value = typeof opt === 'string' ? opt : opt.id;
@@ -121,10 +124,39 @@ export class CharacterCreator {
     this.rootEl.append(this.overlay);
   }
 
+  /** 체형: 예시 버튼(보통/슬림/근육질/통통) + 근육량·몸무게·키 슬라이더 */
+  _buildBodySection(sec) {
+    const presets = el('div', { class: 'chips' }, BODY_PRESETS.map((pr) => el('button', {
+      class: 'chip', attrs: { type: 'button' }, text: pr.label,
+      on: { click: () => this._setMany({ muscle: pr.muscle, weight: pr.weight }) },
+    })));
+    const rows = BODY_SLIDERS.map((sl) => {
+      const input = el('input', { class: 'body-slider', attrs: { type: 'range', min: '0', max: '1', step: '0.05' } });
+      input.addEventListener('input', () => this._setMany({ [sl.key]: Number(input.value) }, true));
+      this.sliders[sl.key] = input;
+      return el('div', { class: 'slider-row' }, [
+        el('span', { class: 'slider-label', text: sl.label }),
+        el('small', { text: sl.min }),
+        input,
+        el('small', { text: sl.max }),
+      ]);
+    });
+    return el('div', { class: 'creator-section' }, [el('div', { class: 'creator-label', text: sec.title }), presets, ...rows]);
+  }
+
   _set(key, value) {
-    this.appearance = sanitizeAppearance({ ...this.appearance, [key]: value });
-    this._refreshSelections();
-    this.preview.setAppearance(this.appearance);
+    this._setMany({ [key]: value });
+  }
+
+  /** 값 변경 → 미리보기 갱신 (슬라이더는 프레임당 한 번만 다시 만듦) */
+  _setMany(values, fromSlider = false) {
+    this.appearance = sanitizeAppearance({ ...this.appearance, ...values });
+    if (!fromSlider) this._refreshSelections();
+    if (this._pending) return;
+    this._pending = requestAnimationFrame(() => {
+      this._pending = 0;
+      this.preview.setAppearance(this.appearance);
+    });
   }
 
   _randomize() {
@@ -139,6 +171,7 @@ export class CharacterCreator {
         btn.classList.toggle('selected', btn.dataset.value === this.appearance[key]);
       }
     }
+    for (const [key, input] of Object.entries(this.sliders)) input.value = String(this.appearance[key]);
   }
 
   async _submit() {

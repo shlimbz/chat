@@ -20,6 +20,10 @@ export function loadConfig(env = process.env) {
     MAX_PLAYERS: Math.max(1, Number(env.MAX_PLAYERS) || 20),
     // 관리자 계정 아이디 (쉼표로 여러 개). 예: ADMIN_USERNAMES=shlimbz,friend01
     ADMIN_USERNAMES: (env.ADMIN_USERNAMES || '').split(',').map((s) => s.trim()).filter(Boolean),
+    // 서버가 시작할 때 이 아이디/비밀번호로 관리자 계정을 자동으로 만들거나 비밀번호를 맞춤
+    // (비밀번호는 코드나 GitHub 에 적지 말고 호스팅 서비스의 환경 변수에만 입력하세요)
+    ADMIN_USERNAME: (env.ADMIN_USERNAME || '').trim(),
+    ADMIN_PASSWORD: env.ADMIN_PASSWORD || '',
     // 채팅 도배 방지: WINDOW_MS 동안 최대 MAX 개
     CHAT_RATE_MAX: 5,
     CHAT_RATE_WINDOW_MS: 5000,

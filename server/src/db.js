@@ -63,6 +63,11 @@ export const MIGRATIONS = [
   ALTER TABLE users ADD COLUMN deleted_at INTEGER;
   CREATE INDEX IF NOT EXISTS idx_users_account ON users(account_id);
   `,
+  // v3: 게임 재화 · 보유 아이템 (악세사리 상점용으로 미리 준비)
+  `
+  ALTER TABLE accounts ADD COLUMN coins INTEGER NOT NULL DEFAULT 0;
+  ALTER TABLE accounts ADD COLUMN items TEXT NOT NULL DEFAULT '[]';
+  `,
 ];
 
 /**

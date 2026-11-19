@@ -8,6 +8,10 @@ import {
   createSignboard, m,
 } from './equipment.js';
 import { EQUIPMENT_TYPES } from '../shared/equipmentTypes.js';
+import {
+  createReceptionDesk, createPlateTree, createKettlebellRow, createStretchZone, createPunchingBag, createLockers,
+  createTowelShelf, createWallClock, createSpeaker, createFloorTrack, createPoster,
+} from './decor.js';
 
 export const GYM_SIZE = { width: 32, depth: 24, height: 5 };
 export const SPAWN_POINT = { x: 0, z: 8, rotY: Math.PI }; // 입구 쪽, 헬스장 안쪽(-z)을 바라봄
@@ -58,6 +62,7 @@ export class Gym {
     this._buildProps();
 
     // 움직이지 않는 메시를 몇 개로 병합 (성능 핵심)
+    this.root.updateMatrixWorld(true);
     this.batchStats = batchStatic(this.root);
     console.info(`[Gym] 정적 메시 병합: ${this.batchStats.before}개 → ${this.batchStats.after}개`);
   }
@@ -276,53 +281,149 @@ export class Gym {
     this.reflector = null;
   }
 
+  /** 기구/벤치 하나를 상호작용 목록에 등록 (상호작용 지점·운동 자세 위치를 월드 좌표로 변환) */
+  _addInteractable({ id, type, x, z, rotY, interactPoint, spot, object = null, parts = {} }) {
+    const info = EQUIPMENT_TYPES[type];
+    const c = Math.cos(rotY);
+    const s = Math.sin(rotY);
+    const toWorld = (lx, lz) => ({ x: x + lx * c + lz * s, z: z - lx * s + lz * c });
+    const ip = toWorld(interactPoint.x, interactPoint.z);
+    const sp = spot || info.spot;
+    const spw = toWorld(sp.x, sp.z);
+    this.interactables.push({
+      id,
+      type,
+      label: info.label,
+      exercise: info.exercise,
+      x: ip.x,
+      z: ip.z,
+      rotY,
+      spot: { x: spw.x, z: spw.z, y: sp.y, r: rotY + sp.r },
+      object,
+      parts,
+    });
+  }
+
   _buildEquipment() {
     for (const item of EQUIPMENT_LAYOUT) {
-      const info = EQUIPMENT_TYPES[item.type];
       const obj = this._place(FACTORIES[item.type](), item.x, item.z, item.rotY, item.id);
       obj.group.name = item.id;
-      // 상호작용 지점을 월드 좌표로 변환
-      const c = Math.cos(item.rotY);
-      const s = Math.sin(item.rotY);
-      const ip = obj.interactPoint;
-      this.interactables.push({
-        id: item.id,
-        type: item.type,
-        label: info.label,
-        x: item.x + ip.x * c + ip.z * s,
-        z: item.z - ip.x * s + ip.z * c,
-        rotY: item.rotY,
-        object: obj.group,
-        parts: obj.movable || {},
+      // 움직이는 부품의 기본 위치 기억 (운동 동작 때 움직임)
+      for (const part of Object.values(obj.movable || {})) part.userData.baseY = part.position.y;
+      this._addInteractable({
+        id: item.id, type: item.type, x: item.x, z: item.z, rotY: item.rotY, interactPoint: obj.interactPoint, object: obj.group, parts: obj.movable || {},
       });
     }
+  }
+
+  /** 휴식 벤치 + 앉을 자리 등록 */
+  _placeBench(length, x, z, rotY, id) {
+    this._place(createRestBench(length), x, z, rotY, id);
+    const n = length >= 2 ? 3 : 2;
+    for (let i = 0; i < n; i++) {
+      const lx = (i - (n - 1) / 2) * (length / n);
+      this._addInteractable({
+        id: `${id}-seat${i}`, type: 'seat', x, z, rotY, interactPoint: { x: lx, z: 0.62 }, spot: { x: lx, z: 0.02, y: 0.48, r: 0 },
+      });
+    }
+  }
+
+  /** 운동 중인 사람에 맞춰 기구 부품 움직이기 (바벨·랫풀다운 바) */
+  animateEquipment(it, k) {
+    const bar = it.parts.barbell;
+    if (bar) bar.position.y = bar.userData.baseY - 0.17 * (1 - k);
+    const pull = it.parts.pullBar;
+    if (pull) pull.position.y = pull.userData.baseY - 0.45 * k;
+  }
+
+  resetEquipment(it) {
+    for (const part of Object.values(it.parts)) if (part.userData.baseY !== undefined) part.position.y = part.userData.baseY;
+  }
+
+  /** 샌드백 흔들기 (근처에서 공격하면) */
+  hitBag(x, z, fromX, fromZ) {
+    const bag = this.punchingBag;
+    if (!bag) return;
+    const bx = bag.worldX;
+    const bz = bag.worldZ;
+    if (Math.hypot(x - bx, z - bz) > 1.6) return;
+    const dx = bx - fromX;
+    const dz = bz - fromZ;
+    const d = Math.hypot(dx, dz) || 1;
+    bag.vx += (dx / d) * 1.6;
+    bag.vz += (dz / d) * 1.6;
+  }
+
+  update(dt) {
+    const bag = this.punchingBag;
+    if (!bag) return;
+    // 진자 운동 (스프링 + 감쇠)
+    bag.vx += (-bag.ax * 18 - bag.vx * 2.2) * dt;
+    bag.vz += (-bag.az * 18 - bag.vz * 2.2) * dt;
+    bag.ax += bag.vx * dt;
+    bag.az += bag.vz * dt;
+    bag.swing.rotation.z = -bag.ax * 0.35;
+    bag.swing.rotation.x = bag.az * 0.35;
   }
 
   _buildProps() {
     const W = GYM_SIZE.width / 2;
     const D = GYM_SIZE.depth / 2;
-    // 휴식 공간
-    this._place(createRestBench(2.2), 10.2, 10.9, 0, 'rest-bench-1');
-    this._place(createRestBench(2.2), 9.2, 8.3, Math.PI / 2, 'rest-bench-2');
+    // 휴식 공간 (앉을 수 있는 벤치)
+    this._placeBench(2.2, 10.2, 10.9, 0, 'rest-bench-1');
+    this._placeBench(2.2, 9.2, 8.3, Math.PI / 2, 'rest-bench-2');
+    this._placeBench(1.6, -5.5, 9.5, 0, 'rest-bench-3');
+    this._placeBench(1.6, 3.5, 2.6, Math.PI, 'rest-bench-4');
     this._place(createWaterCooler(), W - 0.45, D - 0.5, 0, 'cooler');
     this._place(createVendingMachine(), W - 0.55, 7.2, -Math.PI / 2, 'vending');
+    this._place(createTowelShelf(), 13.0, D - 0.35, Math.PI, 'towels');
     // 화분
-    this._place(createPlant(), 8.0, D - 0.5, 0, 'plant');
-    this._place(createPlant(), -W + 0.5, D - 0.5, 0, 'plant');
-    this._place(createPlant(), -W + 0.5, -D + 0.5, 0, 'plant');
-    this._place(createPlant(), W - 0.5, -D + 0.5, 0, 'plant');
-    this._place(createPlant(), -4.9, -D + 0.5, 0, 'plant');
-    this._place(createPlant(), 4.9, -D + 0.5, 0, 'plant');
+    for (const [x, z] of [[8.0, D - 0.5], [-W + 0.5, D - 0.5], [-W + 0.5, -D + 0.5], [W - 0.5, -D + 0.5], [-4.9, -D + 0.5], [4.9, -D + 0.5], [2.2, D - 0.5], [-2.2, D - 0.5]]) {
+      this._place(createPlant(), x, z, 0, 'plant');
+    }
     // 안내판 (입구 옆, 입구 쪽을 바라봄)
     this._place(createSignboard('ONLINE GYM 안내', [
       '이동: W A S D  (Shift 달리기)',
       '점프: Space   채팅: Enter',
-      '카메라: 마우스 드래그 / 휠 줌',
-      '운동기구: 가까이 가서 E',
+      '공격: J 주먹 · K 발차기',
+      '기구·벤치: 가까이 가서 E',
       '귓속말: /w 닉네임 메시지',
       '메뉴: ESC   명령어: /help',
     ]), -3.6, 9.6, 0, 'sign');
-    // 빈 휴식 벤치 하나 더 (머신 구역 옆)
-    this._place(createRestBench(1.6), -5.5, 9.5, 0, 'rest-bench-3');
+    // 안내 데스크 (입구 오른쪽)
+    this._place(createReceptionDesk(), 4.6, 9.9, Math.PI, 'reception');
+    // 자유 웨이트 구역 소품
+    this._place(createPlateTree(), -15.2, -9.6, 0, 'plates');
+    this._place(createKettlebellRow(6), -15.4, -3.2, Math.PI / 2, 'kettlebells');
+    // 스트레칭 구역 + 샌드백 (헬스장 가운데 오른쪽)
+    this._place(createStretchZone(), 4.0, -3.4, 0, 'stretch');
+    const bag = this._place(createPunchingBag(), -3.2, 2.2, 0, 'bag');
+    this.punchingBag = { swing: bag.swing, worldX: -3.2, worldZ: 2.2, ax: 0, az: 0, vx: 0, vz: 0 };
+    // 사물함 (남쪽 벽 왼편)
+    this._place(createLockers(5), -11.5, D - 0.3, Math.PI, 'lockers');
+    // 바닥 트랙
+    this._place(createFloorTrack(11, 7), 0, -0.5, 0, 'track');
+    // 벽 장식 (충돌 없음)
+    const clock = createWallClock();
+    clock.group.position.set(W - 0.06, 3.3, 3.5);
+    clock.group.rotation.y = -Math.PI / 2;
+    this.root.add(clock.group);
+    for (const [x, z, ry] of [[-W + 0.3, -D + 0.3, Math.PI / 4], [W - 0.3, -D + 0.3, -Math.PI / 4], [-W + 0.3, D - 0.3, (3 * Math.PI) / 4], [W - 0.3, D - 0.3, -(3 * Math.PI) / 4]]) {
+      const sp = createSpeaker();
+      sp.group.position.set(x, 4.2, z);
+      sp.group.rotation.y = ry;
+      this.root.add(sp.group);
+    }
+    const posters = [
+      ['NO PAIN\nNO GAIN', '오늘도 득근!', '#2b2d33', '#f6d55c', -W + 0.03, 2.3, -1.2, Math.PI / 2],
+      ['STAY\nHYDRATED', '물 자주 마시기', '#3d7dd8', '#ffffff', W - 0.03, 2.3, 9.2, -Math.PI / 2],
+      ['LEG\nDAY', '하체는 배신하지 않는다', '#e8505b', '#ffffff', -W + 0.03, 2.3, 1.2, Math.PI / 2],
+    ];
+    for (const [t, sub, bg, fg, x, y, z, ry] of posters) {
+      const pst = createPoster(t.replace('\\n', '\n'), sub, bg, fg);
+      pst.group.position.set(x, y, z);
+      pst.group.rotation.y = ry;
+      this.root.add(pst.group);
+    }
   }
 }

@@ -100,8 +100,8 @@ export class CharacterService {
     return this.findById(row.id);
   }
 
-  async updateAppearance(characterId, appearance) {
-    const clean = sanitizeAppearance(appearance);
+  async updateAppearance(characterId, appearance, ownedItems = []) {
+    const clean = sanitizeAppearance(appearance, { ownedItems });
     await this.db.run('UPDATE users SET appearance = ? WHERE id = ?', [JSON.stringify(clean), characterId]);
     return clean;
   }

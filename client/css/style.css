@@ -400,3 +400,10 @@ body.mobile .menu-btn { padding: 12px 14px; }
 }
 body.mobile.chat-mode .hud-top-left, body.mobile.chat-mode .hud-top-right, body.mobile.chat-mode .hud-toast { display: none; }
 body.mobile .chat.expanded { background: rgba(20, 22, 28, .94); }
+
+/* ── 체형 슬라이더 ───────────────── */
+.slider-row { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--ink-soft); }
+.slider-label { width: 46px; font-weight: 800; color: var(--ink); font-size: 13px; }
+.slider-row small { width: 34px; text-align: center; }
+.body-slider { flex: 1; accent-color: var(--ink); height: 28px; }
+.key-chip { min-width: 64px; font-weight: 900; }

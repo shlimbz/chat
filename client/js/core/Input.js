@@ -9,6 +9,7 @@ export class Input {
     this._listeners = new Map(); // code → Set<fn>  (눌린 순간 1회 호출)
     // 모바일 조이스틱 값 (-1~1). TouchControls 가 채움
     this.virtual = { x: 0, y: 0, run: false };
+    this._axis = { x: 0, y: 0 }; // 매 프레임 재사용
 
     this._onKeyDown = (e) => {
       // 텍스트 입력 중에는 게임 키 무시 (ESC 는 메뉴/창 닫기를 위해 허용)
@@ -18,7 +19,7 @@ export class Input {
         if (fns) for (const fn of fns) fn(e);
       }
       this.keys.add(e.code);
-      if (this.enabled && GAME_KEYS.has(e.code)) e.preventDefault();
+      if (this.enabled && (GAME_KEYS.has(e.code) || this.extraGameKeys?.has(e.code))) e.preventDefault();
     };
     this._onKeyUp = (e) => this.keys.delete(e.code);
     this._onBlur = () => this.keys.clear();
@@ -41,7 +42,10 @@ export class Input {
 
   /** WASD/방향키 + 조이스틱 → {x: 좌우(-1~1), y: 앞뒤(-1~1)} */
   getMoveAxis() {
-    if (!this.enabled) return { x: 0, y: 0 };
+    const out = this._axis;
+    out.x = 0;
+    out.y = 0;
+    if (!this.enabled) return out;
     const k = this.keys;
     let x = (k.has('KeyD') || k.has('ArrowRight') ? 1 : 0) - (k.has('KeyA') || k.has('ArrowLeft') ? 1 : 0);
     let y = (k.has('KeyW') || k.has('ArrowUp') ? 1 : 0) - (k.has('KeyS') || k.has('ArrowDown') ? 1 : 0);
@@ -49,7 +53,9 @@ export class Input {
       x = this.virtual.x;
       y = this.virtual.y;
     }
-    return { x, y };
+    out.x = x;
+    out.y = y;
+    return out;
   }
 
   isRunning() {
@@ -70,7 +76,7 @@ export class Input {
   }
 }
 
-const GAME_KEYS = new Set(['KeyW', 'KeyA', 'KeyS', 'KeyD', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Space', 'KeyF', 'KeyG']);
+const GAME_KEYS = new Set(['KeyW', 'KeyA', 'KeyS', 'KeyD', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Space']);
 
 export function isTyping(el) {
   if (!el || !el.tagName) return false;

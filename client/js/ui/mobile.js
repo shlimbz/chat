@@ -74,6 +74,10 @@ export class TouchControls {
   }
 
   setUseVisible(v, label = '이용') {
+    // 매 프레임 호출되므로 바뀔 때만 DOM 수정 (불필요한 화면 재계산 방지)
+    const key = v ? label : '';
+    if (key === this._useKey) return;
+    this._useKey = key;
     this.useBtn.classList.toggle('hidden', !v);
     if (v) this.useBtn.textContent = label;
   }

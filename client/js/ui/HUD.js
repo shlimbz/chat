@@ -2,7 +2,10 @@
 // 좌상단: 닉네임/레벨 · 우상단: 접속자 수 · 좌하단: 채팅 자리 · 하단 중앙: 상호작용 안내 · 우하단: 상태
 import { el } from './dom.js';
 
-const ACTION_LABEL = { idle: '대기', walk: '걷는 중', run: '달리는 중', jump: '점프!' };
+const ACTION_LABEL = {
+  idle: '대기', walk: '걷는 중', run: '달리는 중', jump: '점프!', sit: '쉬는 중',
+  ex_tread: '러닝 중', ex_bench: '벤치프레스 중', ex_curl: '덤벨컬 중', ex_legpress: '레그프레스 중', ex_shoulder: '숄더프레스 중', ex_lat: '랫풀다운 중',
+};
 
 export class HUD {
   constructor(root) {
@@ -43,7 +46,7 @@ export class HUD {
       el('span', { html: '<b>드래그</b> 카메라' }),
       el('span', { html: '<b>휠</b> 줌' }),
       el('span', { html: '<b>E</b> 기구 이용' }),
-      el('span', { html: '<b>F</b> 주먹 <b>G</b> 발차기' }),
+      this.attackHelp = el('span', { html: '<b>J</b> 주먹 <b>K</b> 발차기' }),
       el('span', { html: '<b>Enter</b> 채팅' }),
       el('span', { html: '<b>ESC</b> 메뉴' }),
     ]);
@@ -98,9 +101,17 @@ export class HUD {
     this.fpsEl.classList.toggle('hidden', !v);
   }
 
-  setFps(fps, drawCalls, triangles) {
+  setAttackKeys(punch, kick) {
+    if (this.attackHelp) this.attackHelp.innerHTML = `<b>${escapeHtml(punch)}</b> 주먹 <b>${escapeHtml(kick)}</b> 발차기`;
+  }
+
+  /**
+   * 성능 표시: FPS 가 낮으면 그래픽(내 기기) 문제, 핑이 높으면 네트워크/서버 문제
+   */
+  setFps(fps, drawCalls, triangles, ping, pixelRatio) {
     if (this.fpsEl.classList.contains('hidden')) return;
-    this.fpsEl.textContent = `${Math.round(fps)} FPS · 드로우콜 ${drawCalls} · 삼각형 ${(triangles / 1000).toFixed(1)}k`;
+    const pingText = ping === undefined ? '' : ` · 핑 ${ping == null ? '-' : `${ping}ms`}`;
+    this.fpsEl.textContent = `${Math.round(fps)} FPS${pingText} · 해상도 ${Math.round(pixelRatio * 100)}% · 드로우콜 ${drawCalls} · 삼각형 ${(triangles / 1000).toFixed(1)}k`;
   }
 
   toast(text, ms = 2600) {
@@ -113,4 +124,8 @@ export class HUD {
   setVisible(v) {
     this.root.classList.toggle('hidden', !v);
   }
+}
+
+function escapeHtml(t) {
+  return String(t).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 }

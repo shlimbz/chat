@@ -11,7 +11,7 @@ import {
 } from './core/storage.js';
 import { resolveServerUrl } from './config.js';
 import { AUTH_ERRORS, AUTH_ERROR_TEXT } from './shared/protocol.js';
-import { isMobile, setupMobileDefaults } from './ui/mobile.js';
+import { setupMobileDefaults } from './ui/mobile.js';
 
 async function boot() {
   window.__ONLINE_GYM_BOOTED = true;
@@ -178,7 +178,7 @@ async function boot() {
         window.location.reload();
       },
     });
-    game.hud.toast(`${welcome.self.nickname}님, ONLINE GYM에 오신 것을 환영합니다!${isMobile() ? '' : ' (F 주먹 · G 발차기)'}`);
+    game.hud.toast(`${welcome.self.nickname}님, ONLINE GYM에 오신 것을 환영합니다!`);
     return;
   }
 }

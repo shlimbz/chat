@@ -9,6 +9,8 @@
 import { CharacterModel } from '../character/CharacterModel.js';
 import { CONFIG } from '../config.js';
 import { lerpAngle } from '../character/PlayerController.js';
+import { indexToAction } from '../shared/protocol.js';
+import { EXERCISES } from '../character/CharacterModel.js';
 
 const MAX_BUFFER = 40;
 const MAX_EXTRAPOLATE_MS = 150;
@@ -27,14 +29,20 @@ class RemotePlayer {
     this.rot = info.r || 0;
     this.speed = 0;
     this.visible = true;
+    this.action = indexToAction(info.a || 0);
+    this._applyAction();
     this._apply();
   }
 
+  _applyAction() {
+    this.model.setExercise(EXERCISES.includes(this.action) ? this.action : null);
+  }
+
   /** t: 로컬 시계로 환산된 서버 시각 */
-  push(x, y, z, r, t) {
+  push(x, y, z, r, a, t) {
     const last = this.buffer[this.buffer.length - 1];
     if (last && t <= last.t) return; // 순서가 뒤바뀐 패킷 무시
-    this.buffer.push({ t, x, y, z, r });
+    this.buffer.push({ t, x, y, z, r, a: indexToAction(a) });
     if (this.buffer.length > MAX_BUFFER) this.buffer.shift();
   }
 
@@ -75,6 +83,23 @@ class RemotePlayer {
       this.pos.y += (last.y - this.pos.y) * f;
       this.pos.z += (last.z - this.pos.z) * f;
       this.rot = lerpAngle(this.rot, last.r, f);
+    }
+    // 현재 보여주는 시점의 동작(앉기·운동 등)
+    if (b.length) {
+      // 보여주는 시점(renderT) 이전의 가장 최신 샘플의 동작 (없으면 가장 오래된 샘플)
+      let cur = b[0];
+      for (let i = b.length - 1; i >= 0; i--) {
+        if (b[i].t <= renderT) { cur = b[i]; break; }
+      }
+      const act = cur.a;
+      if (act !== this.action) {
+        this.action = act;
+        this._applyAction();
+        if (this.model.exercise) { // 자세를 잡는 순간 위치로 바로 이동 (미끄러지지 않게)
+          const last = b[b.length - 1];
+          this.pos.x = last.x; this.pos.y = last.y; this.pos.z = last.z; this.rot = last.r;
+        }
+      }
     }
     const moved = Math.hypot(this.pos.x - prevX, this.pos.z - prevZ);
     const instSpeed = dt > 0 ? moved / dt : 0;
@@ -162,7 +187,7 @@ export class RemotePlayers {
     for (const row of packet.p) {
       if (!Array.isArray(row) || row[0] === selfId) continue;
       const p = this.map.get(row[0]);
-      if (p) p.push(row[1], row[2], row[3], row[4], t);
+      if (p) p.push(row[1], row[2], row[3], row[4], row[5], t);
     }
   }
 
