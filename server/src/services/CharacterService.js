@@ -58,11 +58,13 @@ export class CharacterService {
   }
 
   /** @returns {Promise<{ok:true, character}|{ok:false, error:string}>} */
-  async create(accountId, nickname, appearance) {
+  async create(accountId, nickname, appearance, max = MAX_CHARACTERS) {
     const nick = validateNickname(nickname);
     if (!nick.ok) return { ok: false, error: nick.error };
     const list = await this.listByAccount(accountId);
-    if (list.length >= MAX_CHARACTERS) return { ok: false, error: `캐릭터는 계정당 최대 ${MAX_CHARACTERS}개까지 만들 수 있습니다.` };
+    if (list.length >= max) {
+      return { ok: false, error: max === 1 ? '게스트는 캐릭터를 1개만 만들 수 있어요. 계정으로 저장하면 3개까지 만들 수 있어요.' : `캐릭터는 계정당 최대 ${max}개까지 만들 수 있습니다.` };
+    }
     if (await this.db.get('SELECT id FROM users WHERE nickname = ?', [nick.value])) {
       return { ok: false, error: '이미 사용 중인 닉네임입니다.' };
     }

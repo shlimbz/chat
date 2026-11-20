@@ -147,6 +147,11 @@ export class PlayerController {
     if (!spec || this.locked || this.isDown || this.activity || !this.input.enabled) return false;
     if (now < this._attackReadyAt[type] || now < this._attackBusyUntil) return false;
     this._attackReadyAt[type] = now + spec.cooldownMs;
+    // 마우스 시점: 때릴 때는 바라보는(카메라) 방향으로 바로 돌아섬 → 조준한 쪽을 때림
+    if (this.faceCamera && this.camera.getForward) {
+      const f = this.camera.getForward();
+      this.rotY = Math.atan2(f.x, f.z);
+    }
     this._attackBusyUntil = now + spec.durationMs * 0.7;
     this.model.playAttack(type);
     return true;
@@ -280,10 +285,17 @@ export class PlayerController {
       this.onPad?.();
     }
 
-    // 마우스 시점: 카메라가 보는 쪽을 바라봄 / 아니면 이동 방향으로 회전 (맞아서 밀려날 때는 그대로)
+    // 마우스 시점: 움직일 때만 카메라가 보는 쪽으로 부드럽게 돌아섬 (서 있을 때는 카메라만 돌아감 → 캐릭터 얼굴도 볼 수 있음)
+    //   한 번에 너무 빨리 돌지 않도록 초당 최대 회전량 제한 → 뒤로 확 돌 때도 자연스럽게 몸을 돌림
     if (this.faceCamera && !down) {
-      const targetRot = Math.atan2(f.x, f.z);
-      this.rotY = lerpAngle(this.rotY, targetRot, Math.min(1, dt * 18));
+      if (len > 0) {
+        const targetRot = Math.atan2(f.x, f.z);
+        let d = (targetRot - this.rotY) % (Math.PI * 2);
+        if (d > Math.PI) d -= Math.PI * 2;
+        if (d < -Math.PI) d += Math.PI * 2;
+        const step = Math.sign(d) * Math.min(Math.abs(d) * Math.min(1, dt * 12), 11 * dt);
+        this.rotY += step;
+      }
     } else if (len > 0 && !down) {
       const targetRot = Math.atan2(mx, mz);
       this.rotY = lerpAngle(this.rotY, targetRot, Math.min(1, dt * CONFIG.TURN_SPEED));

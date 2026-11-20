@@ -1,13 +1,13 @@
-// 진입점
-//  온라인: 서버 깨우기 → 로그인(자동 로그인) → 캐릭터 선택/생성 → 서버 접속 → 헬스장
-//  오프라인: 캐릭터 만들기 → 헬스장 (서버 주소가 없거나 "오프라인으로 둘러보기" 선택 시)
+// 진입점 — 항상 온라인 (오프라인 모드 없음)
+//  서버 깨우기 → 로그인(자동 로그인) 또는 게스트로 바로 시작 → 캐릭터 선택/생성 → 서버 접속 → 헬스장
+//  게스트: 아이디 없이 시작, 캐릭터 1개. 캐릭터 선택 화면에서 "계정으로 저장" 가능
 import { CharacterCreator } from './ui/CharacterCreator.js';
 import { ConnectDialog } from './ui/ConnectDialog.js';
 import { LoginScreen, CharacterSelect } from './ui/AccountScreens.js';
 import { Game } from './core/Game.js';
 import { ApiClient } from './net/ApiClient.js';
 import {
-  loadProfile, saveProfile, loadSettings, saveSettings, loadToken, clearTokens, loadSession, saveSession, clearSession,
+  loadSettings, saveSettings, loadToken, clearTokens, loadSession, saveSession, clearSession,
 } from './core/storage.js';
 import { resolveServerUrl } from './config.js';
 import { AUTH_ERRORS, AUTH_ERROR_TEXT } from './shared/protocol.js';
@@ -31,16 +31,9 @@ async function boot() {
     return game;
   };
 
-  // ── 오프라인 모드 ──
-  const playOffline = async () => {
-    const profile = await creator.open({ mode: 'create', profile: loadProfile(), submitLabel: '오프라인으로 입장' });
-    saveProfile(profile);
-    const game = startGame({ profile });
-    game.hud.toast(`${profile.nickname}님, 오프라인 모드로 입장했습니다.`);
-  };
-
   if (!serverUrl) {
-    await playOffline();
+    await dialog.ask('설정 오류', '게임 서버 주소가 설정되어 있지 않습니다. (client/js/config.js 의 DEPLOYED_SERVER_URL)', [{ label: '새로고침', value: 'r', primary: true }]);
+    window.location.reload();
     return;
   }
 
@@ -54,11 +47,9 @@ async function boot() {
   for (;;) {
     dialog.showProgress('서버에 연결하는 중…', '무료 서버는 처음 깨어날 때 최대 1분 정도 걸릴 수 있어요.');
     if (await api.wake()) break;
-    const choice = await dialog.ask('서버 접속 실패', `게임 서버(${serverUrl})에 연결할 수 없습니다. 잠시 후 다시 시도해 주세요.`, [
+    await dialog.ask('서버 접속 실패', `게임 서버(${serverUrl})에 연결할 수 없습니다. 잠시 후 다시 시도해 주세요.`, [
       { label: '다시 시도', value: 'retry', primary: true },
-      { label: '오프라인으로 둘러보기', value: 'offline' },
     ]);
-    if (choice === 'offline') { await playOffline(); return; }
   }
   dialog.hide();
 
@@ -75,9 +66,20 @@ async function boot() {
           return e.code === 'NETWORK' ? '서버에 연결할 수 없습니다.' : e.message;
         }
       };
-      const res = await login.open({ onLogin: onAuth('login'), onRegister: onAuth('register'), error: loginError });
+      const onGuest = async () => {
+        try {
+          const r = await api.guest();
+          api.token = r.token;
+          saveSession(serverUrl, { token: r.token, username: '게스트', guest: true });
+          return null;
+        } catch (e) {
+          return e.code === 'NETWORK' ? '서버에 연결할 수 없습니다.' : e.message;
+        }
+      };
+      await login.open({
+        onLogin: onAuth('login'), onRegister: onAuth('register'), onGuest, error: loginError,
+      });
       loginError = '';
-      if (res === 'offline') { await playOffline(); return; }
     }
 
     // ── 2) 내 정보 + 캐릭터 목록 ──
@@ -105,23 +107,30 @@ async function boot() {
     const lastId = loadSession(serverUrl)?.lastCharacterId;
     me.characters.sort((a, b) => (b.id === lastId) - (a.id === lastId));
 
-    // ── 3) 캐릭터 선택 ──
-    const choice = await select.open({
+    const createCharacter = (cancelable) => creator.open({
+      mode: 'create',
+      submitLabel: me.account.isGuest ? '만들고 입장하기' : '만들기',
+      cancelable,
+      onSubmit: async ({ nickname, appearance }) => {
+        try {
+          const r = await api.createCharacter(nickname, appearance);
+          creator._created = r.character;
+          return null;
+        } catch (e) { return e.message; }
+      },
+    }).then((res) => (res ? creator._created : null));
+
+    // ── 3) 캐릭터 선택 (게스트가 처음이면 바로 캐릭터 만들기 → 입장) ──
+    let choice;
+    if (me.account.isGuest && !me.characters.length) {
+      const c = await createCharacter(false);
+      choice = c ? { character: c } : null;
+      if (!choice) continue;
+    } else choice = await select.open({
       account: me.account,
       characters: me.characters,
       max: me.maxCharacters,
-      onCreate: () => creator.open({
-        mode: 'create',
-        submitLabel: '만들기',
-        cancelable: true,
-        onSubmit: async ({ nickname, appearance }) => {
-          try {
-            const r = await api.createCharacter(nickname, appearance);
-            creator._created = r.character;
-            return null;
-          } catch (e) { return e.message; }
-        },
-      }).then((res) => (res ? creator._created : null)),
+      onCreate: () => createCharacter(true),
       onEdit: (c) => creator.open({
         mode: 'edit',
         profile: c,
@@ -133,6 +142,17 @@ async function boot() {
         try { await api.deleteCharacter(c.id); return null; } catch (e) { return e.message; }
       },
     });
+    if (choice.upgrade) {
+      // 게스트 → 계정으로 저장 (아이디·비밀번호 만들기)
+      await login.openUpgrade(async (username, password) => {
+        try {
+          await api.upgrade(username, password);
+          saveSession(serverUrl, { token: api.token, username, guest: false });
+          return null;
+        } catch (e) { return e.code === 'NETWORK' ? '서버에 연결할 수 없습니다.' : e.message; }
+      });
+      continue;
+    }
     if (choice.logout) {
       await api.logout();
       clearSession(serverUrl);
@@ -169,12 +189,15 @@ async function boot() {
       profile: { nickname: welcome.self.nickname, appearance: character.appearance },
       network,
       welcome,
-      account: { username: me.account.username, isAdmin: !!welcome.self.admin },
+      account: { username: me.account.username, isAdmin: !!welcome.self.admin, isGuest: !!me.account.isGuest },
       onChangeCharacter: () => { network.disconnect(); window.location.reload(); },
       onLogout: async () => {
         network.disconnect();
-        await api.logout();
-        clearSession(serverUrl);
+        // 게스트는 로그아웃하면 캐릭터를 다시 찾을 수 없으므로 세션을 남겨 두고 처음 화면(캐릭터 선택)으로
+        if (!me.account.isGuest) {
+          await api.logout();
+          clearSession(serverUrl);
+        }
         window.location.reload();
       },
     });

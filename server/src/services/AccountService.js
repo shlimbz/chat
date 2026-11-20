@@ -9,6 +9,9 @@ import { ECONOMY } from '../../../client/js/shared/economy.js';
 
 const scrypt = promisify(crypto.scrypt);
 const SESSION_DAYS = 30;
+const GUEST_SESSION_DAYS = 365; // 게스트는 브라우저에 저장된 토큰이 곧 계정 → 길게
+export const GUEST_PREFIX = 'guest_';
+export const GUEST_MAX_CHARACTERS = 1;
 const SCRYPT_N = 16384;
 
 export const hashSessionToken = (t) => crypto.createHash('sha256').update(String(t)).digest('hex');
@@ -82,6 +85,7 @@ export class AccountService {
       id: Number(row.id),
       username: row.username,
       isAdmin: row.role === 'admin' || this.admins.has(String(row.username).toLowerCase()),
+      isGuest: row.role === 'guest',
       banned: Number(row.banned) === 1,
       banReason: row.ban_reason || null,
       coins: Number(row.coins ?? 0),
@@ -105,6 +109,7 @@ export class AccountService {
     const p = validatePassword(password);
     if (!p.ok) return { ok: false, error: p.error };
     if (this.reserved.has(u.value.toLowerCase())) return { ok: false, error: '사용할 수 없는 아이디입니다.' };
+    if (u.value.toLowerCase().startsWith(GUEST_PREFIX)) return { ok: false, error: `'${GUEST_PREFIX}' 로 시작하는 아이디는 쓸 수 없습니다.` };
     if (await this.db.get('SELECT id FROM accounts WHERE username = ?', [u.value])) {
       return { ok: false, error: '이미 사용 중인 아이디입니다.' };
     }
@@ -122,25 +127,74 @@ export class AccountService {
     }
   }
 
+  /**
+   * 게스트 계정: 아이디·비밀번호 없이 바로 시작 (캐릭터 1개). 나중에 upgrade 로 일반 계정 전환 가능
+   * 비밀번호 칸에는 로그인에 쓸 수 없는 값을 넣어 둠 (게스트는 토큰으로만 접속)
+   */
+  async createGuest() {
+    for (let i = 0; i < 5; i++) {
+      const username = `${GUEST_PREFIX}${crypto.randomBytes(6).toString('base64url').replace(/[^a-zA-Z0-9]/g, '').slice(0, 8).padEnd(8, '0')}`;
+      try {
+        const res = await this.db.run(
+          "INSERT INTO accounts (username, password_hash, role, created_at, last_login_at, coins) VALUES (?, ?, 'guest', ?, ?, ?)",
+          [username, `guest$${crypto.randomBytes(16).toString('hex')}`, Date.now(), Date.now(), ECONOMY.STARTING_COINS],
+        );
+        const account = await this.findById(res.lastInsertRowid);
+        return { ok: true, account, token: await this._createSession(account.id, GUEST_SESSION_DAYS) };
+      } catch (err) {
+        if (!String(err.message).includes('UNIQUE')) throw err;
+      }
+    }
+    throw new Error('게스트 아이디 생성 실패');
+  }
+
+  /** 게스트 → 일반 계정 (캐릭터·코인·아이템 그대로) */
+  async upgradeGuest(accountId, username, password) {
+    const acc = await this.findById(accountId);
+    if (!acc?.isGuest) return { ok: false, error: '게스트 계정이 아닙니다.' };
+    const u = validateUsername(username);
+    if (!u.ok) return { ok: false, error: u.error };
+    const p = validatePassword(password);
+    if (!p.ok) return { ok: false, error: p.error };
+    if (this.reserved.has(u.value.toLowerCase()) || u.value.toLowerCase().startsWith(GUEST_PREFIX)) return { ok: false, error: '사용할 수 없는 아이디입니다.' };
+    if (await this.db.get('SELECT id FROM accounts WHERE username = ?', [u.value])) return { ok: false, error: '이미 사용 중인 아이디입니다.' };
+    try {
+      await this.db.run("UPDATE accounts SET username = ?, password_hash = ?, role = 'user' WHERE id = ? AND role = 'guest'", [u.value, await hashPassword(password), accountId]);
+    } catch (err) {
+      if (String(err.message).includes('UNIQUE')) return { ok: false, error: '이미 사용 중인 아이디입니다.' };
+      throw err;
+    }
+    return { ok: true, account: await this.findById(accountId) };
+  }
+
+  /** 캐릭터를 만들지 않고 떠난 게스트 계정 정리 (하루 지난 것) */
+  async cleanupGuests() {
+    const where = `role = 'guest' AND created_at < ? AND id NOT IN (SELECT account_id FROM users WHERE account_id IS NOT NULL)`;
+    const cutoff = Date.now() - 86400000;
+    await this.db.run(`DELETE FROM sessions WHERE account_id IN (SELECT id FROM accounts WHERE ${where})`, [cutoff]);
+    const r = await this.db.run(`DELETE FROM accounts WHERE ${where}`, [cutoff]);
+    return r.changes;
+  }
+
   async login(username, password) {
     const row = typeof username === 'string' && username.length <= 32
       ? await this.db.get('SELECT * FROM accounts WHERE username = ?', [username.trim()])
       : null;
     // 아이디가 없어도 같은 시간이 걸리도록 더미 검증 (아이디 존재 여부 추측 방지)
     const ok = row ? await verifyPassword(password, row.password_hash) : (await hashPassword('dummy-password'), false);
-    if (!row || !ok) return { ok: false, error: '아이디 또는 비밀번호가 올바르지 않습니다.' };
+    if (!row || !ok || row.role === 'guest') return { ok: false, error: '아이디 또는 비밀번호가 올바르지 않습니다.' };
     const account = this._toAccount(row);
     if (account.banned) return { ok: false, error: `이용이 제한된 계정입니다.${account.banReason ? ` (사유: ${account.banReason})` : ''}`, code: 'BANNED' };
     await this.db.run('UPDATE accounts SET last_login_at = ? WHERE id = ?', [Date.now(), account.id]);
     return { ok: true, account, token: await this._createSession(account.id) };
   }
 
-  async _createSession(accountId) {
+  async _createSession(accountId, days = SESSION_DAYS) {
     const token = crypto.randomBytes(32).toString('base64url');
     const now = Date.now();
     await this.db.run(
       'INSERT INTO sessions (token_hash, account_id, created_at, expires_at) VALUES (?, ?, ?, ?)',
-      [hashSessionToken(token), accountId, now, now + SESSION_DAYS * 86400000],
+      [hashSessionToken(token), accountId, now, now + days * 86400000],
     );
     return token;
   }

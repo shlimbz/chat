@@ -35,6 +35,8 @@ export class ApiClient {
 
   register(username, password) { return this._req('POST', '/api/auth/register', { username, password }); }
   login(username, password) { return this._req('POST', '/api/auth/login', { username, password }); }
+  guest() { return this._req('POST', '/api/auth/guest', {}); }
+  upgrade(username, password) { return this._req('POST', '/api/auth/upgrade', { username, password }); }
   logout() { return this._req('POST', '/api/auth/logout', {}).catch(() => {}); }
   me() { return this._req('GET', '/api/me'); }
   createCharacter(nickname, appearance) { return this._req('POST', '/api/characters', { nickname, appearance }); }

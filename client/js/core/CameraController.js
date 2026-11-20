@@ -50,11 +50,15 @@ export class CameraController {
       this._unlocking = false;
       this.onLockChange?.(this.locked);
     };
+    // 마우스 움직임은 바로 돌리지 않고 모아 두었다가 update() 에서 부드럽게 반영 (아주 짧은 지연, 끊김 없음)
+    this._lookX = 0;
+    this._lookY = 0;
     this._onMouseMove = (e) => {
       if (!this.locked || !this.enabled) return;
-      this.yaw -= e.movementX * this.sensitivity * 0.8;
-      this.pitch += e.movementY * this.sensitivity * 0.8 * (this.invertY ? -1 : 1);
-      this.pitch = Math.min(1.25, Math.max(-0.25, this.pitch));
+      // 크롬 마우스 고정 버그: 가끔 한 번에 수백 픽셀이 튀는 값이 옴 → 무시 (시점이 확 돌아가는 원인)
+      if (Math.abs(e.movementX) > 220 || Math.abs(e.movementY) > 220) return;
+      this._lookX += e.movementX;
+      this._lookY += e.movementY;
     };
     document.addEventListener('pointerlockchange', this._onLockChange);
     document.addEventListener('mousemove', this._onMouseMove);
@@ -117,10 +121,17 @@ export class CameraController {
   /** 마우스 고정 (클릭·키 입력 직후에만 브라우저가 허락) */
   lock() {
     if (!this.mouseLook || this.locked || !this.dom.requestPointerLock) return;
+    // unadjustedMovement: OS 마우스 가속을 빼고 실제 움직인 만큼만 (지원하지 않는 브라우저는 일반 모드로)
+    const plain = () => {
+      try {
+        const r2 = this.dom.requestPointerLock();
+        if (r2 && r2.catch) r2.catch(() => {});
+      } catch { /* 허락되지 않음 → 다음 클릭 때 */ }
+    };
     try {
-      const r = this.dom.requestPointerLock();
-      if (r && r.catch) r.catch(() => {});
-    } catch { /* 허락되지 않음 → 다음 클릭 때 */ }
+      const r = this.dom.requestPointerLock({ unadjustedMovement: true });
+      if (r && r.catch) r.catch((err) => { if (err?.name === 'NotSupportedError') plain(); });
+    } catch { plain(); }
   }
 
   /** 메뉴·채팅 등을 열 때 마우스 풀기 (다시 닫으면 relock 으로 복귀) */
@@ -184,6 +195,20 @@ export class CameraController {
    * @param {{x:number,y:number,z:number}} focus 캐릭터 발 위치
    */
   update(dt, focus) {
+    // 모아 둔 마우스 움직임을 부드럽게 반영 (지수 감쇠: 약 40ms 안에 대부분 반영)
+    if (this._lookX || this._lookY) {
+      const k = 1 - Math.exp(-dt * 26);
+      const mx = this._lookX * k;
+      const my = this._lookY * k;
+      this._lookX -= mx;
+      this._lookY -= my;
+      if (Math.abs(this._lookX) < 0.01) this._lookX = 0;
+      if (Math.abs(this._lookY) < 0.01) this._lookY = 0;
+      const sens = this.sensitivity * 0.8;
+      this.yaw -= mx * sens;
+      this.pitch += my * sens * (this.invertY ? -1 : 1);
+      this.pitch = Math.min(1.25, Math.max(-0.25, this.pitch));
+    }
     this.target.set(focus.x, focus.y + CONFIG.CAMERA_TARGET_HEIGHT, focus.z);
     if (this._first) {
       this._smoothTarget.copy(this.target);
@@ -194,16 +219,33 @@ export class CameraController {
     this.distance += (this.targetDistance - this.distance) * Math.min(1, dt * 10);
 
     const cp = Math.cos(this.pitch);
-    let x = this._smoothTarget.x + Math.sin(this.yaw) * cp * this.distance;
-    let y = this._smoothTarget.y + Math.sin(this.pitch) * this.distance;
-    let z = this._smoothTarget.z + Math.cos(this.yaw) * cp * this.distance;
+    const dx = Math.sin(this.yaw) * cp;
+    const dy = Math.sin(this.pitch);
+    const dz = Math.cos(this.yaw) * cp;
+    const T = this._smoothTarget;
 
-    // 벽 밖으로 나가지 않도록 제한
+    // 벽·천장: 좌표를 축마다 잘라내면 시점 방향이 갑자기 꺾이므로,
+    // 캐릭터→카메라 방향은 그대로 두고 벽에 닿는 거리까지만 카메라를 당김 (실제 게임 방식)
     const B = this.bounds;
-    const pad = 0.25;
-    x = Math.min(B.maxX - pad, Math.max(B.minX + pad, x));
-    z = Math.min(B.maxZ - pad, Math.max(B.minZ + pad, z));
-    y = Math.min(B.maxY - pad, Math.max(0.35, y));
+    const pad = 0.3;
+    let maxD = this.distance;
+    const lim = (p, d, lo, hi) => {
+      if (d > 1e-6) return (hi - p) / d;
+      if (d < -1e-6) return (lo - p) / d;
+      return Infinity;
+    };
+    maxD = Math.min(maxD, lim(T.x, dx, B.minX + pad, B.maxX - pad), lim(T.z, dz, B.minZ + pad, B.maxZ - pad), lim(T.y, dy, 0.35, B.maxY - pad));
+    maxD = Math.max(0.6, maxD);
+    // 벽에 막힐 때는 바로 당기고, 풀릴 때는 천천히 멀어짐 (튀지 않게)
+    if (this._wallDist === undefined || maxD < this._wallDist) this._wallDist = maxD;
+    else this._wallDist += (maxD - this._wallDist) * Math.min(1, dt * 4);
+    const D = Math.min(this.distance, this._wallDist);
+    let x = T.x + dx * D;
+    let y = T.y + dy * D;
+    let z = T.z + dz * D;
+    x = Math.min(B.maxX - 0.05, Math.max(B.minX + 0.05, x));
+    z = Math.min(B.maxZ - 0.05, Math.max(B.minZ + 0.05, z));
+    y = Math.min(B.maxY - 0.05, Math.max(0.3, y));
 
     this.camera.position.set(x, y, z);
     this.camera.lookAt(this._smoothTarget);

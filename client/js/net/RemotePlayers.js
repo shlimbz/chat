@@ -21,7 +21,9 @@ class RemotePlayer {
     this.id = info.id;
     this.nickname = info.nickname;
     this.admin = !!info.admin;
+    this.npc = !!info.npc; // 서버가 움직이는 NPC (이름에 [NPC])
     this.model = new CharacterModel(info.appearance, { nickname: info.nickname, blobShadow: opts.blobShadow, admin: this.admin });
+    if (this.npc) this.model.setNickname(info.nickname, '#9fd8ff');
     if (info.bodyStats) this.model.setBodyStats(info.bodyStats);
     this.model.setCastShadow(opts.castShadow);
     if (this.model.nameTag) this.model.nameTag.visible = opts.showNameTags;
@@ -151,6 +153,13 @@ export class RemotePlayers {
 
   get count() {
     return this.map.size;
+  }
+
+  /** NPC 를 뺀 실제 사람 수 */
+  get humanCount() {
+    let n = 0;
+    for (const p of this.map.values()) if (!p.npc) n++;
+    return n;
   }
 
   list() {

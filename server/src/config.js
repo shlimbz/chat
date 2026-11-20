@@ -24,6 +24,12 @@ export function loadConfig(env = process.env) {
     // (비밀번호는 코드나 GitHub 에 적지 말고 호스팅 서비스의 환경 변수에만 입력하세요)
     ADMIN_USERNAME: (env.ADMIN_USERNAME || '').trim(),
     ADMIN_PASSWORD: env.ADMIN_PASSWORD || '',
+    // 잠들지 않기: 이 주소/health 를 10분마다 스스로 호출 (Render 무료 서버는 15분 동안 요청이 없으면 잠듦)
+    // Render 는 RENDER_EXTERNAL_URL 을 자동으로 넣어 줌. KEEP_ALIVE=0 이면 끔
+    KEEP_ALIVE_URL: env.KEEP_ALIVE === '0' ? '' : (env.KEEP_ALIVE_URL || env.RENDER_EXTERNAL_URL || '').trim().replace(/\/$/, ''),
+    KEEP_ALIVE_MS: Math.max(60000, Number(env.KEEP_ALIVE_MS) || 10 * 60 * 1000),
+    // 헬스장을 돌아다니며 운동하는 NPC 수 (0 이면 없음)
+    NPC_COUNT: Math.max(0, Math.min(10, env.NPC_COUNT === undefined ? 6 : Number(env.NPC_COUNT) || 0)),
     // 채팅 도배 방지: WINDOW_MS 동안 최대 MAX 개
     CHAT_RATE_MAX: 5,
     CHAT_RATE_WINDOW_MS: 5000,

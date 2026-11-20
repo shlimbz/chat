@@ -99,6 +99,7 @@ export class PlayerRegistry {
       bodyStats: p.bodyStats,
       level: p.level,
       admin: p.admin,
+      npc: !!p.npc,
       x: round2(p.x), y: round2(p.y), z: round2(p.z), r: round2(p.r), a: p.a,
     };
   }

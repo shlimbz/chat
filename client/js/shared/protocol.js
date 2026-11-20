@@ -1,7 +1,7 @@
 // 클라이언트 ↔ 서버 통신 규약 (양쪽이 같은 파일을 import)
 // 이벤트 이름과 값의 범위를 한곳에서 관리합니다.
 
-export const PROTOCOL_VERSION = 8;
+export const PROTOCOL_VERSION = 9;
 
 export const EV = {
   // 서버 → 클라이언트
@@ -34,6 +34,7 @@ export const EV = {
   // 득근 타워 (맵 이동)
   MAP_TRAVEL: 'map:travel', // { to:'tower'|'gym' } → ack({ ok, message?, map, x, y, z, r })  포탈 근처에서만 (서버 확인)
   TOWER_RESPAWN: 'tower:respawn', // { restart } → ack({ ok, x, y, z, r, cp })  서버가 기억한 체크포인트로 이동
+  NPC_SAY: 'npc:say', // 서버 → 전체: { id, text }  NPC 말풍선 (채팅 기록에는 안 남음)
   TOWER_STATE: 'tower:state', // 서버 → 본인: { cp, startedAt, clearMs?, coins? }  체크포인트 통과 / 클리어
 };
 

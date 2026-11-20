@@ -64,6 +64,35 @@ for (const [name, makeDb] of Object.entries(BACKENDS)) {
     assert.equal(admin.account.isAdmin, true); // ADMIN_USERNAMES (대소문자 무시)
   });
 
+  test(`[${name}] 게스트: 바로 시작, 캐릭터 1개, 비밀번호 로그인 불가, 계정 전환, 빈 게스트 정리`, async () => {
+    const db = await makeDb();
+    const accounts = new AccountService(db);
+    const chars = new CharacterService(db);
+    const g = await accounts.createGuest();
+    assert.equal(g.ok, true);
+    assert.ok(g.account.isGuest);
+    assert.ok(g.account.username.startsWith('guest_'));
+    assert.equal(g.account.coins, ECONOMY.STARTING_COINS);
+    assert.equal((await accounts.fromSession(g.token)).id, g.account.id);
+    assert.equal((await chars.create(g.account.id, '게스트1', {}, 1)).ok, true);
+    assert.equal((await chars.create(g.account.id, '게스트2', {}, 1)).ok, false); // 1개만
+    assert.equal((await accounts.login(g.account.username, 'anything1')).ok, false);
+    assert.equal((await accounts.register('guest_hack1', 'secret123')).ok, false); // guest_ 아이디 예약
+    // 계정으로 전환: 캐릭터·세션 유지
+    assert.equal((await accounts.upgradeGuest(g.account.id, 'realuser1', 'secret123')).ok, true);
+    const acc = await accounts.fromSession(g.token);
+    assert.equal(acc.isGuest, false);
+    assert.equal(acc.username, 'realuser1');
+    assert.equal((await chars.listByAccount(acc.id)).length, 1);
+    assert.equal((await accounts.login('realuser1', 'secret123')).ok, true);
+    assert.equal((await accounts.upgradeGuest(acc.id, 'other111', 'secret123')).ok, false); // 이미 일반 계정
+    // 캐릭터 없이 하루 지난 게스트는 정리
+    const empty = await accounts.createGuest();
+    await db.run('UPDATE accounts SET created_at = ? WHERE id = ?', [Date.now() - 2 * 86400000, empty.account.id]);
+    assert.equal(await accounts.cleanupGuests(), 1);
+    assert.equal(await accounts.fromSession(empty.token), null);
+  });
+
   test(`[${name}] 코인: 시작 코인, 벌기(시간당 상한), 구매/판매, 잔액 부족, 동시 구매, 관리자 지급, 저장`, async () => {
     const db = await makeDb();
     const accounts = new AccountService(db);
@@ -335,4 +364,52 @@ test('이동 검증: 범위 제한, 순간이동 차단, 넉백 중 여유, 변�
   // 넉백 중에는 더 빠른 이동 허용
   p.knockbackUntil = 1000;
   assert.equal(reg.applyMove(p, [0.5, 0, 10.0, 0, 0], 500), 'ok');
+});
+
+test('NPC: 통로로 걸어가 운동·샌드백·휴식, 사람이 쓰는 자리는 피함, 이름에 [NPC]', async () => {
+  const { NpcManager } = await import('../src/game/NpcManager.js');
+  const { NODES, EDGES } = await import('../../client/js/shared/npcRoutes.js');
+  const { ACTIONS } = await import('../../client/js/shared/protocol.js');
+  let seed = 7;
+  const rnd = () => { seed = (seed * 16807) % 2147483647; return seed / 2147483647; };
+  const taken = new Set(['bench-1', 'treadmill-2']); // 사람이 쓰는 중
+  const said = [];
+  const punches = [];
+  const m = new NpcManager({
+    count: 6, rnd, isTaken: (d) => taken.has(d.id), onSay: (n, t) => said.push(t), onAttack: (n, t) => punches.push(t),
+  });
+  assert.equal(m.list().length, 6);
+  assert.ok(m.list().every((n) => n.nickname.startsWith('[NPC] ') && n.id < 0));
+  // 걷는 위치가 항상 통로 선분(또는 목적지 접근 구간) 위인지 확인할 수 있도록 선분 목록
+  const segs = EDGES.map(([a, b]) => [NODES[a], NODES[b]]);
+  const onSeg = (x, z) => segs.some(([a, b]) => {
+    const vx = b.x - a.x; const vz = b.z - a.z; const L2 = vx * vx + vz * vz;
+    const t = Math.max(0, Math.min(1, ((x - a.x) * vx + (z - a.z) * vz) / L2));
+    return Math.hypot(a.x + vx * t - x, a.z + vz * t - z) < 0.05;
+  });
+  let now = 1_000_000;
+  const used = new Set();
+  const kinds = new Set();
+  let offRoute = 0;
+  for (let i = 0; i < 12 * 60 * 15; i++) { // 15분
+    now += 1000 / 12;
+    m.update(1 / 12, now);
+    for (const n of m.list()) {
+      if (n.state === 'busy') { used.add(n.dest.id); kinds.add(n.dest.kind); }
+      // 통로를 걷는 중(마지막 접근 구간 제외)에는 통로 위
+      if (n.state === 'walk' && n.waypoints.length > 1 && !onSeg(n.x, n.z)) offRoute++;
+    }
+    // 같은 자리를 두 NPC가 동시에 쓰지 않음
+    const busy = m.list().filter((n) => n.state === 'busy').map((n) => n.dest.id);
+    assert.equal(new Set(busy).size, busy.length);
+  }
+  assert.equal(offRoute, 0);
+  assert.ok(!used.has('bench-1') && !used.has('treadmill-2'), '사람이 쓰는 기구는 피함');
+  assert.ok(used.size >= 10, `여러 곳을 돌아다님 (${used.size}곳)`);
+  for (const k of ['exercise', 'bag', 'sit']) assert.ok(kinds.has(k), `${k} 함`);
+  assert.ok(said.length > 0 && punches.length > 0);
+  // 운동 중 동작 번호가 실제 운동 동작
+  const ex = m.list().find((n) => n.state === 'busy' && n.dest.kind === 'exercise');
+  if (ex) assert.ok(ACTIONS[ex.a].startsWith('ex_'));
+  assert.ok(m.takeStatePacket().length >= 0);
 });

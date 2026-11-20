@@ -13,6 +13,7 @@ import {
   MAPS, GYM_PORTAL, GYM_RETURN, PORTAL_RANGE, TOWER_SPAWN, TOWER_CHECKPOINTS, MIN_CLEAR_MS, CLEAR_REWARD, standingOn,
 } from '../../../client/js/shared/towerLayout.js';
 import { PlayerRegistry } from '../game/PlayerRegistry.js';
+import { NpcManager } from '../game/NpcManager.js';
 import { resolveAttack } from '../game/combat.js';
 import {
   ChatService, RateLimiter, parseChatInput, HELP_TEXT, ADMIN_HELP_TEXT,
@@ -69,6 +70,19 @@ export function attachGameHandlers(io, {
     }
   };
   const broadcastSystem = (text) => io.emit(EV.CHAT, ChatService.system(text));
+
+  // ── NPC (헬스장을 돌아다니며 운동) ──
+  const npcs = new NpcManager({
+    count: config.NPC_COUNT ?? 6,
+    // 사람이 그 자리를 쓰고 있거나 바로 앞에 서 있으면 NPC 는 다른 곳으로
+    isTaken: (dest) => registry.list().some((p) => {
+      if (p.map !== MAPS.GYM) return false;
+      const near = dest.kind === 'bag' || dest.kind === 'hang' ? 0.9 : 0.6;
+      return Math.hypot(p.x - dest.spot.x, p.z - dest.spot.z) < near || Math.hypot(p.x - dest.approach.x, p.z - dest.approach.z) < 0.5;
+    }),
+    onAttack: (n, type) => io.emit(EV.ATTACK_FX, { id: n.id, type }),
+    onSay: (n, text) => io.emit(EV.NPC_SAY, { id: n.id, text }),
+  });
 
   // ── 득근 타워 ──
   const fmtClear = (ms) => `${Math.floor(ms / 60000)}:${String(Math.floor((ms % 60000) / 1000)).padStart(2, '0')}.${Math.floor((ms % 1000) / 100)}`;
@@ -263,7 +277,7 @@ export function attachGameHandlers(io, {
         appearance: player.appearance,
         wallet,
       },
-      players: registry.list().filter((p) => p !== player).map(PlayerRegistry.info),
+      players: [...registry.list().filter((p) => p !== player), ...npcs.list()].map(PlayerRegistry.info),
       chat: socket.data.history,
       maxPlayers: config.MAX_PLAYERS,
       serverTime: Date.now(),
@@ -327,11 +341,12 @@ export function attachGameHandlers(io, {
       const p = registry.get(socket.id);
       const type = typeof msg === 'string' ? msg : msg?.type;
       if (!p || !ATTACKS[type]) return;
-      const res = resolveAttack(p, registry.list(), type);
+      const res = resolveAttack(p, [...registry.list(), ...npcs.list()], type);
       if (!res.ok) return;
       socket.broadcast.emit(EV.ATTACK_FX, { id: p.id, type });
       for (const h of res.hits) {
         io.emit(EV.HIT, { from: p.id, to: h.target.id, type, kx: h.kx, kz: h.kz, down: h.down });
+        if (h.target.npc) npcs.onHit(h.target);
       }
       // ── 샌드백: 서버가 아는 위치·방향으로 다시 판정 + "가운데(초록 불)" 타이밍 판정 ──
       const reach = type === 'kick' ? 1.05 : 0.9;
@@ -503,8 +518,13 @@ export function attachGameHandlers(io, {
   });
 
   // ── 위치 브로드캐스트 (변경된 플레이어만) + 서버 시각 → 클라이언트가 일정한 간격으로 보간 ──
+  let lastTick = Date.now();
   const tick = setInterval(() => {
-    const packet = registry.takeStatePacket();
+    const now = Date.now();
+    // 보는 사람이 있을 때만 NPC 를 움직임 (아무도 없으면 계산 안 함)
+    if (registry.count) npcs.update(Math.min(0.5, (now - lastTick) / 1000), now);
+    lastTick = now;
+    const packet = registry.takeStatePacket().concat(npcs.takeStatePacket());
     if (packet.length) io.emit(EV.STATE, { t: Date.now(), p: packet });
   }, 1000 / SERVER_TICK_HZ);
 
@@ -541,6 +561,7 @@ export function attachGameHandlers(io, {
 
   return {
     registry,
+    npcs,
     /** REST API 에서 계정 차단/삭제 시 접속 중인 캐릭터를 내보내기 위해 사용 */
     kickAccount(accountId, reason) {
       for (const p of registry.listByAccount(accountId)) kickPlayer(p, reason);

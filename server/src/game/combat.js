@@ -34,6 +34,11 @@ export function resolveAttack(attacker, players, type, now = Date.now()) {
 
     const nx = dist > 0.01 ? dx / dist : fx;
     const nz = dist > 0.01 ? dz / dist : fz;
+    // NPC: 맞는 효과만 (넘어지거나 밀려나지 않음)
+    if (t.npc) {
+      hits.push({ target: t, kx: 0, kz: 0, down: false });
+      continue;
+    }
 
     // 연타 누적 → 기절(넘어짐)
     t.hitLog = (t.hitLog || []).filter((h) => now - h.t < KNOCKDOWN.windowMs);

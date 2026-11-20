@@ -433,6 +433,10 @@ export class Game {
       this.player.teleport(x, z, this.player.rotY, y);
     });
     net.on(EV.TOWER_STATE, (st) => this._onTowerState(st));
+    net.on(EV.NPC_SAY, ({ id, text }) => {
+      const p = this.remotePlayers.get(id);
+      if (p?.visible && this._near(p.pos, 18)) p.model.say(String(text).slice(0, 40));
+    });
     net.on(EV.CHAT, (msg) => {
       this.chat.addMessage(msg);
       // 전체 채팅은 말한 캐릭터 머리 위에 말풍선 (귓속말은 표시 안 함)
@@ -538,7 +542,7 @@ export class Game {
       this.hud.setOnline({ count: 1, label: '오프라인 모드', state: 'offline' });
       return;
     }
-    const count = this.remotePlayers.count + 1;
+    const count = this.remotePlayers.humanCount + 1; // NPC 는 접속자 수에서 뺌
     if (net.status === 'online') this.hud.setOnline({ count, max: this.maxPlayers, state: 'online' });
     else if (net.status === 'reconnecting') this.hud.setOnline({ count, label: '재연결 중…', state: 'warn' });
     else this.hud.setOnline({ count: 1, label: '연결 끊김', state: 'offline' });
@@ -558,7 +562,7 @@ export class Game {
 
   _playerList() {
     const me = { nickname: this.profile.nickname, self: true, admin: !!this.account?.isAdmin };
-    return [me, ...this.remotePlayers.list().map((p) => ({ nickname: p.nickname, self: false, admin: p.admin }))];
+    return [me, ...this.remotePlayers.list().filter((p) => !p.npc).map((p) => ({ nickname: p.nickname, self: false, admin: p.admin }))];
   }
 
   // ── 입력 처리 ─────────────────────────────────────────

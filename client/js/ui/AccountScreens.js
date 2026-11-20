@@ -16,7 +16,11 @@ export class LoginScreen {
     this.error = el('div', { class: 'creator-error' });
     this.status = el('div', { class: 'auth-status' });
     this.submit = el('button', { class: 'btn btn-primary auth-submit', attrs: { type: 'submit' }, text: '로그인' });
-    this.offlineBtn = el('button', { class: 'auth-link', attrs: { type: 'button' }, text: '서버 없이 오프라인으로 둘러보기' });
+    this.guestBtn = el('button', { class: 'btn btn-primary auth-guest', attrs: { type: 'button' }, text: '🎮 게스트로 바로 시작' });
+    this.guestNote = el('div', { class: 'auth-note', text: '아이디 없이 바로 접속해요 (캐릭터 1개). 나중에 계정으로 저장할 수 있어요.' });
+    this.orLine = el('div', { class: 'auth-or', text: '또는 계정으로' });
+    this.title = el('div', { class: 'auth-upgrade-title hidden' });
+    this.cancelBtn = el('button', { class: 'auth-link hidden', attrs: { type: 'button' }, text: '← 돌아가기' });
 
     const form = el('form', { class: 'auth-form' }, [this.user, this.pass, this.pass2, this.error, this.submit]);
     form.addEventListener('submit', (e) => { e.preventDefault(); this._submit(); });
@@ -26,10 +30,14 @@ export class LoginScreen {
       el('div', { class: 'auth-panel' }, [
         el('div', { class: 'logo logo-big', html: 'ONLINE <span>GYM</span>' }),
         el('p', { class: 'auth-sub', text: '동글동글 친구들과 함께하는 3D 헬스장' }),
-        el('div', { class: 'auth-tabs' }, [this.tabLogin, this.tabRegister]),
+        this.guestBtn,
+        this.guestNote,
+        this.orLine,
+        this.title,
+        this.tabs = el('div', { class: 'auth-tabs' }, [this.tabLogin, this.tabRegister]),
         form,
         this.status,
-        this.offlineBtn,
+        this.cancelBtn,
       ]),
     ]);
     root.append(this.overlay);
@@ -38,18 +46,52 @@ export class LoginScreen {
   /**
    * @param {{onLogin:Function, onRegister:Function, error?:string, status?:string}} h
    *   onLogin/onRegister(username, password) → Promise<오류문구|null>
-   * @returns {Promise<'ok'|'offline'>}
+   * @returns {Promise<'ok'|'guest'>}
    */
   open(h) {
     this.h = h;
+    this._setUpgrade(false);
     this.error.textContent = h.error || '';
     this.status.textContent = h.status || '';
     this.overlay.classList.remove('hidden');
-    if (!window.matchMedia('(pointer: coarse)').matches) setTimeout(() => this.user.focus(), 50);
     return new Promise((resolve) => {
       this._resolve = resolve;
-      this.offlineBtn.onclick = () => { this.close(); resolve('offline'); };
+      this.guestBtn.onclick = async () => {
+        this.guestBtn.disabled = true;
+        const err = await h.onGuest();
+        this.guestBtn.disabled = false;
+        if (err) { this.error.textContent = err; return; }
+        this.close();
+        resolve('guest');
+      };
     });
+  }
+
+  /**
+   * 게스트 → 계정 저장 화면 (아이디·비밀번호 만들기)
+   * @param {(username:string, password:string)=>Promise<string|null>} onSubmit
+   * @returns {Promise<'ok'|'cancel'>}
+   */
+  openUpgrade(onSubmit) {
+    this.h = { onRegister: onSubmit };
+    this._setUpgrade(true);
+    this.error.textContent = '';
+    this.status.textContent = '';
+    this.overlay.classList.remove('hidden');
+    return new Promise((resolve) => {
+      this._resolve = resolve;
+      this.cancelBtn.onclick = () => { this.close(); resolve('cancel'); };
+    });
+  }
+
+  _setUpgrade(v) {
+    this.upgrade = v;
+    for (const e of [this.guestBtn, this.guestNote, this.orLine, this.tabs]) e.classList.toggle('hidden', v);
+    this.title.classList.toggle('hidden', !v);
+    this.cancelBtn.classList.toggle('hidden', !v);
+    this.title.textContent = '🔐 게스트 캐릭터를 계정으로 저장 — 캐릭터·코인·아이템이 그대로 유지돼요';
+    this._setMode(v ? 'register' : 'login');
+    if (v) this.submit.textContent = '계정으로 저장하기';
   }
 
   setStatus(text) {
@@ -133,14 +175,15 @@ export class CharacterSelect {
    * @param {{account:{username:string,isAdmin:boolean}, characters:Array, max:number,
    *          onCreate:Function, onEdit:Function, onDelete:Function}} o
    *   onCreate() → Promise<character|null>, onEdit(c) → Promise<character|null>, onDelete(c) → Promise<오류|null>
-   * @returns {Promise<{character:object}|{logout:true}>}
+   * @returns {Promise<{character:object}|{logout:true}|{upgrade:true}>}
    */
   open(o) {
     this.o = o;
     this.list = [...o.characters];
     this.selected = this.list[0] || null;
+    this.logoutBtn.textContent = o.account.isGuest ? '🔐 계정으로 저장' : '로그아웃';
     this.accountEl.replaceChildren(
-      el('span', { text: `👤 ${o.account.username}` }),
+      el('span', { text: o.account.isGuest ? '🎮 게스트' : `👤 ${o.account.username}` }),
       ...(o.account.isAdmin ? [el('span', { class: 'admin-badge', text: '관리자' })] : []),
     );
     this.error.textContent = '';
@@ -155,7 +198,7 @@ export class CharacterSelect {
         this.close();
         resolve({ character: this.selected });
       };
-      this.logoutBtn.onclick = () => { this.close(); resolve({ logout: true }); };
+      this.logoutBtn.onclick = () => { this.close(); resolve(o.account.isGuest ? { upgrade: true } : { logout: true }); };
       this.editBtn.onclick = () => this._edit();
       this.deleteBtn.onclick = () => this._delete();
     });

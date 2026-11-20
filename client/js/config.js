@@ -4,8 +4,7 @@
 // ─────────────────────────────────────────────────────────────
 
 // ★ 게임 서버를 배포한 뒤, 그 주소를 여기에 입력하세요. (예: 'https://online-gym-server.onrender.com')
-//   비워두면 localhost 에서 접속할 때만 http://localhost:3000 서버를 사용하고,
-//   그 외에는 오프라인 모드로 실행됩니다.
+//   비워두면 localhost 에서 접속할 때만 http://localhost:3000 서버를 사용합니다. (오프라인 모드는 없음)
 const DEPLOYED_SERVER_URL = 'https://online-gym-server.onrender.com';
 
 const override = (typeof window !== 'undefined' && window.ONLINE_GYM_CONFIG) || {};
@@ -13,8 +12,7 @@ const SERVER_KEY = 'onlinegym.server.v1';
 
 /**
  * 서버 주소 결정 순서
- *  1) 주소창의 ?server=주소  (테스트용, 브라우저에 기억됨)
- *     ?server=off → 오프라인 모드 고정,  ?server= (빈 값) → 기억한 주소 삭제
+ *  1) 주소창의 ?server=주소  (테스트용, 브라우저에 기억됨)  ?server= (빈 값) → 기억한 주소 삭제
  *  2) index.html 의 window.ONLINE_GYM_CONFIG.SERVER_URL
  *  3) 위의 DEPLOYED_SERVER_URL
  *  4) localhost 로 접속 중이면 http://localhost:3000
@@ -25,11 +23,11 @@ export function resolveServerUrl() {
     const q = new URLSearchParams(window.location.search).get('server');
     if (q !== null) {
       if (q === '') window.localStorage.removeItem(SERVER_KEY); // ?server=  → 기본값으로 되돌림
-      else window.localStorage.setItem(SERVER_KEY, q === 'off' ? 'off' : q.replace(/\/$/, ''));
+      else if (q !== 'off') window.localStorage.setItem(SERVER_KEY, q.replace(/\/$/, ''));
     }
     const saved = window.localStorage.getItem(SERVER_KEY);
-    if (saved === 'off') return ''; // ?server=off → 항상 오프라인 모드
-    if (saved) return saved;
+    if (saved === 'off') window.localStorage.removeItem(SERVER_KEY); // 예전 오프라인 설정은 지움
+    else if (saved) return saved;
   } catch { /* localStorage 사용 불가 */ }
   if (override.SERVER_URL) return override.SERVER_URL.replace(/\/$/, '');
   if (DEPLOYED_SERVER_URL) return DEPLOYED_SERVER_URL.replace(/\/$/, '');

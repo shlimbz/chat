@@ -3,6 +3,8 @@
 // REST API (로그인·캐릭터 관리) — 게임 접속 전 단계
 //   POST   /api/auth/register   { username, password }        → { token, account }
 //   POST   /api/auth/login      { username, password }        → { token, account }
+//   POST   /api/auth/guest                                     → { token, account }  (게스트: 캐릭터 1개)
+//   POST   /api/auth/upgrade    { username, password }        → { account }  (게스트 → 일반 계정)
 //   POST   /api/auth/logout     (Authorization: Bearer 토큰)
 //   GET    /api/me                                             → { account, characters, maxCharacters }
 //   POST   /api/characters      { nickname, appearance }       → { character }
@@ -13,7 +15,7 @@ import http from 'node:http';
 import express from 'express';
 import { Server } from 'socket.io';
 import { openDatabase } from './db.js';
-import { AccountService } from './services/AccountService.js';
+import { AccountService, GUEST_MAX_CHARACTERS } from './services/AccountService.js';
 import { CharacterService, characterSummary } from './services/CharacterService.js';
 import { ChatService, RateLimiter } from './services/ChatService.js';
 import { attachGameHandlers } from './socket/handlers.js';
@@ -35,7 +37,7 @@ export async function createGameServer(config, { log = console.log, libsqlClient
     log(r.ok ? `[admin] 관리자 계정 ${r.created ? '생성' : '확인'}: ${config.ADMIN_USERNAME}` : `[admin] 관리자 계정 설정 실패 — ${r.error}`);
   }
   // 만료된 세션 정리 (시작 시 + 6시간마다)
-  const cleanup = () => accounts.cleanupSessions().catch((err) => log('[db] 세션 정리 실패', err));
+  const cleanup = () => accounts.cleanupSessions().then(() => accounts.cleanupGuests()).catch((err) => log('[db] 세션 정리 실패', err));
   cleanup();
   const cleanupTimer = setInterval(cleanup, 6 * 3600 * 1000);
   cleanupTimer.unref?.();
@@ -43,6 +45,8 @@ export async function createGameServer(config, { log = console.log, libsqlClient
   const chat = new ChatService(db);
   // 로그인/가입 시도 제한 (비밀번호 무차별 대입 방지): IP 당 10분에 20회
   const authLimiter = new RateLimiter(20, 10 * 60 * 1000);
+  // 게스트 계정 만들기 제한: IP 당 1시간에 10개
+  const guestLimiter = new RateLimiter(10, 60 * 60 * 1000);
 
   const app = express();
   app.disable('x-powered-by');
@@ -95,7 +99,8 @@ export async function createGameServer(config, { log = console.log, libsqlClient
     }
     return account;
   };
-  const publicAccount = (a) => ({ username: a.username, isAdmin: a.isAdmin });
+  const publicAccount = (a) => ({ username: a.isGuest ? '게스트' : a.username, isAdmin: a.isAdmin, isGuest: !!a.isGuest });
+  const maxChars = (a) => (a.isGuest ? GUEST_MAX_CHARACTERS : MAX_CHARACTERS);
   const clientIp = (req) => req.ip || req.socket?.remoteAddress || 'unknown';
 
   app.post('/api/auth/register', h(async (req, res) => {
@@ -115,6 +120,24 @@ export async function createGameServer(config, { log = console.log, libsqlClient
     return res.json({ token: r.token, account: publicAccount(r.account) });
   }));
 
+  app.post('/api/auth/guest', h(async (req, res) => {
+    if (!guestLimiter.allow(clientIp(req))) return res.status(429).json({ error: '게스트 계정을 너무 많이 만들었어요. 잠시 후 다시 시도하세요.' });
+    const r = await accounts.createGuest();
+    log(`[account] 게스트 시작: ${r.account.username}`);
+    return res.json({ token: r.token, account: publicAccount(r.account) });
+  }));
+
+  app.post('/api/auth/upgrade', h(async (req, res) => {
+    const account = await requireAccount(req, res);
+    if (!account) return;
+    if (!authLimiter.allow(clientIp(req))) return res.status(429).json({ error: '시도가 너무 많습니다. 10분 후 다시 시도하세요.' });
+    const { username, password } = req.body || {};
+    const r = await accounts.upgradeGuest(account.id, username, password);
+    if (!r.ok) return res.status(400).json({ error: r.error });
+    log(`[account] 게스트 → 계정 전환: ${r.account.username}`);
+    return res.json({ account: publicAccount(r.account) });
+  }));
+
   app.post('/api/auth/logout', h(async (req, res) => {
     await accounts.logout(bearer(req));
     res.json({ ok: true });
@@ -124,14 +147,14 @@ export async function createGameServer(config, { log = console.log, libsqlClient
     const account = await requireAccount(req, res);
     if (!account) return;
     const list = await characters.listByAccount(account.id);
-    res.json({ account: publicAccount(account), characters: list.map(characterSummary), maxCharacters: MAX_CHARACTERS });
+    res.json({ account: publicAccount(account), characters: list.map(characterSummary), maxCharacters: maxChars(account) });
   }));
 
   app.post('/api/characters', h(async (req, res) => {
     const account = await requireAccount(req, res);
     if (!account) return;
     const { nickname, appearance } = req.body || {};
-    const r = await characters.create(account.id, nickname, appearance);
+    const r = await characters.create(account.id, nickname, appearance, maxChars(account));
     if (!r.ok) return res.status(400).json({ error: r.error });
     log(`[character] 생성: ${r.character.nickname} (${account.username})`);
     return res.json({ character: characterSummary(r.character) });
@@ -160,6 +183,7 @@ export async function createGameServer(config, { log = console.log, libsqlClient
   app.post('/api/characters/claim', h(async (req, res) => {
     const account = await requireAccount(req, res);
     if (!account) return;
+    if (account.isGuest) return res.json({ claimed: [] });
     const tokens = Array.isArray(req.body?.tokens) ? req.body.tokens.slice(0, 10) : [];
     const claimed = [];
     for (const t of tokens) {
