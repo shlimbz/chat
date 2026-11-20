@@ -28,8 +28,8 @@ export function loadConfig(env = process.env) {
     // Render 는 RENDER_EXTERNAL_URL 을 자동으로 넣어 줌. KEEP_ALIVE=0 이면 끔
     KEEP_ALIVE_URL: env.KEEP_ALIVE === '0' ? '' : (env.KEEP_ALIVE_URL || env.RENDER_EXTERNAL_URL || '').trim().replace(/\/$/, ''),
     KEEP_ALIVE_MS: Math.max(60000, Number(env.KEEP_ALIVE_MS) || 10 * 60 * 1000),
-    // 헬스장을 돌아다니며 운동하는 NPC 수 (0 이면 없음)
-    NPC_COUNT: Math.max(0, Math.min(10, env.NPC_COUNT === undefined ? 6 : Number(env.NPC_COUNT) || 0)),
+    // 헬스장을 돌아다니며 운동하는 NPC 수 (기본 3, 0 이면 없음, 안내 코치는 별도)
+    NPC_COUNT: Math.max(0, Math.min(10, env.NPC_COUNT === undefined ? 3 : Number(env.NPC_COUNT) || 0)),
     // 채팅 도배 방지: WINDOW_MS 동안 최대 MAX 개
     CHAT_RATE_MAX: 5,
     CHAT_RATE_WINDOW_MS: 5000,

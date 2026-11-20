@@ -34,6 +34,7 @@ export class CameraController {
     this.locked = false;
     this.wantLock = false; // 사용자가 직접 Esc 로 풀기 전까지는 다시 잠금
     this.unlockedAt = 0;
+    this.lockedAt = 0;
     this.onLockChange = null;
     // 자동 따라가기 (모바일): 이동 중에 카메라가 천천히 캐릭터 뒤로 돌아감
     this.autoFollow = false;
@@ -46,7 +47,7 @@ export class CameraController {
         this.unlockedAt = performance.now();
         if (!this._unlocking) this.wantLock = false; // 사용자가 Esc 로 직접 풂
       }
-      if (this.locked) this.wantLock = true;
+      if (this.locked) { this.wantLock = true; this.lockedAt = performance.now(); }
       this._unlocking = false;
       this.onLockChange?.(this.locked);
     };

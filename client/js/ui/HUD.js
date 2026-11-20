@@ -56,7 +56,7 @@ export class HUD {
       el('span', { html: '<b>휠</b> 줌' }),
       el('span', { html: '<b>E</b> 기구 이용' }),
       el('span', { html: '<b>I</b> 가방' }),
-      this.attackHelp = el('span', { html: '<b>J</b> 주먹 <b>K</b> 발차기' }),
+      this.attackHelp = el('span', { html: '<b>좌클릭/J</b> 주먹 <b>우클릭/K</b> 발차기' }),
       el('span', { html: '<b>Enter</b> 채팅' }),
       el('span', { html: '<b>ESC</b> 메뉴' }),
     ]);
@@ -67,7 +67,7 @@ export class HUD {
 
     // 마우스 시점: 가운데 조준점 + 잠기기 전 안내
     this.crosshair = el('div', { class: 'hud-crosshair hidden' });
-    this.lookHint = el('div', { class: 'hud-look-hint hidden', html: '🖱️ 화면을 <b>클릭</b>하면 마우스로 시점을 돌려요 · <b>Esc</b> 로 마우스 꺼내기' });
+    this.lookHint = el('div', { class: 'hud-look-hint hidden', html: '🖱️ 화면을 <b>클릭</b>하면 마우스 시점 (좌클릭 주먹 · 우클릭 발차기) · <b>Esc</b> 로 마우스 꺼내기' });
     this.root.append(this.crosshair, this.lookHint);
 
     this.toastEl = el('div', { class: 'hud-toast hidden' });
@@ -136,7 +136,7 @@ export class HUD {
   }
 
   setAttackKeys(punch, kick) {
-    if (this.attackHelp) this.attackHelp.innerHTML = `<b>${escapeHtml(punch)}</b> 주먹 <b>${escapeHtml(kick)}</b> 발차기`;
+    if (this.attackHelp) this.attackHelp.innerHTML = `<b>좌클릭/${escapeHtml(punch)}</b> 주먹 <b>우클릭/${escapeHtml(kick)}</b> 발차기`;
   }
 
   /**

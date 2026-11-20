@@ -207,6 +207,19 @@ export class Game {
       if (this.input.enabled) this.openShop(null, 'inventory');
     });
     this.input.onPress('Escape', () => this._escape());
+    // 마우스 시점(마우스가 화면에 고정된 상태)에서만: 좌클릭 = 주먹, 우클릭 = 발차기
+    //   마우스가 풀려 있을 때(상점·메뉴·채팅·가방 등)는 클릭이 그대로 화면 버튼으로 감 → 충돌 없음
+    this._onMouseAttack = (e) => {
+      const cam = this.cameraCtl;
+      if (!cam.locked || !this.input.enabled || this.chat.isFocused()) return;
+      if (performance.now() - cam.lockedAt < 250) return; // 마우스를 고정하려고 누른 클릭은 공격 아님
+      if (e.button === 0) this.attack('punch');
+      else if (e.button === 2) this.attack('kick');
+    };
+    document.addEventListener('mousedown', this._onMouseAttack);
+    // 다른 탭으로 가면 타워 배경음악 멈춤 (돌아오면 다시)
+    this._onVisibility = () => { if (document.hidden) this.music?.stop(); else this._syncMusic(); };
+    document.addEventListener('visibilitychange', this._onVisibility);
     this.input.onPress('KeyR', () => {
       if (this.map === MAPS.TOWER && this.input.enabled && !this.chat.isFocused()) this.towerRespawn(this.run.done ? 'restart' : 'manual');
     });
@@ -760,7 +773,7 @@ export class Game {
       }
     } else this.gym.update(dt, ms, this.player.position);
     this.player.update(dt);
-    this.remotePlayers.update(dt);
+    this.remotePlayers.update(dt, this.player.position);
     this.effects.update(dt);
     if (!inTower) this._animateEquipment();
     this.cameraCtl.followBehind(dt, this.player.rotY, this.player.speed > 0.6 && !this.player.activity);

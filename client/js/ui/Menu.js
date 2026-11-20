@@ -261,6 +261,7 @@ export class Menu {
       el('label', { class: 'menu-row' }, [el('span', { text: '해상도 자동 조절 (버벅이면 자동으로 낮춤)' }), this.autoResInput]),
       el('label', { class: 'menu-row' }, [el('span', { text: '30fps 제한 (배터리·발열 절약)' }), this.fpsCapInput]),
       el('label', { class: 'menu-row' }, [el('span', { text: '다른 사람 트레일·오라 보기' }), this.othersFxInput]),
+      ...(this.h.isMobile ? [] : [el('div', { class: 'menu-hint', text: '마우스 시점 중에는 좌클릭 = 주먹, 우클릭 = 발차기 (아래 키도 같이 쓸 수 있어요)' })]),
       el('div', { class: 'menu-row' }, [el('span', { text: '주먹 키' }), this._keyButton('punch')]),
       el('div', { class: 'menu-row' }, [el('span', { text: '발차기 키' }), this._keyButton('kick')]),
       this.keyMsg,

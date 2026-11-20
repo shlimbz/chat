@@ -73,7 +73,7 @@ export function attachGameHandlers(io, {
 
   // ── NPC (헬스장을 돌아다니며 운동) ──
   const npcs = new NpcManager({
-    count: config.NPC_COUNT ?? 6,
+    count: config.NPC_COUNT ?? 3,
     // 사람이 그 자리를 쓰고 있거나 바로 앞에 서 있으면 NPC 는 다른 곳으로
     isTaken: (dest) => registry.list().some((p) => {
       if (p.map !== MAPS.GYM) return false;

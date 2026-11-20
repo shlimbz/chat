@@ -54,7 +54,7 @@ class RemotePlayer {
     if (this.buffer.length > MAX_BUFFER) this.buffer.shift();
   }
 
-  update(dt, renderT) {
+  update(dt, renderT, far = false) {
     const b = this.buffer;
     while (b.length >= 3 && b[1].t <= renderT) b.shift();
 
@@ -120,7 +120,12 @@ class RemotePlayer {
     const instSpeed = dt > 0 ? moved / dt : 0;
     this.speed += (instSpeed - this.speed) * Math.min(1, dt * 8);
     this._apply();
-    if (this.visible) this.model.update(dt, this.speed < 0.15 ? 0 : this.speed, this.pos.y > 0.05 && this._airborne());
+    if (!this.visible) return;
+    // 멀리 있는 캐릭터는 뼈대 애니메이션을 10번에 1번 꼴(0.1초마다)로만 계산 (위치는 매 프레임 그대로)
+    this._animAcc = (this._animAcc || 0) + dt;
+    if (far && this._animAcc < 0.1) return;
+    this.model.update(this._animAcc, this.speed < 0.15 ? 0 : this.speed, this.pos.y > 0.05 && this._airborne());
+    this._animAcc = 0;
   }
 
   _airborne() {
@@ -237,7 +242,8 @@ export class RemotePlayers {
     for (const p of this.map.values()) {
       const vis = mapOf(p.pos.x) === this.viewerMap;
       if (vis !== p.visible) { p.visible = vis; p.model.root.visible = vis; }
-      p.update(dt, renderT);
+      const far = !!viewer && Math.hypot(p.pos.x - viewer.x, p.pos.z - viewer.z) > 22;
+      p.update(dt, renderT, far);
     }
   }
 
