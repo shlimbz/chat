@@ -52,7 +52,7 @@ export class HUD {
       el('span', { html: '<b>WASD</b> 이동' }),
       el('span', { html: '<b>Shift</b> 달리기' }),
       el('span', { html: '<b>Space</b> 점프' }),
-      el('span', { html: '<b>드래그</b> 카메라' }),
+      el('span', { html: '<b>클릭</b> 마우스 시점 (<b>Esc</b> 해제)' }),
       el('span', { html: '<b>휠</b> 줌' }),
       el('span', { html: '<b>E</b> 기구 이용' }),
       el('span', { html: '<b>I</b> 가방' }),
@@ -64,6 +64,11 @@ export class HUD {
 
     this.fpsEl = el('div', { class: 'hud-fps hidden' });
     this.root.append(this.fpsEl);
+
+    // 마우스 시점: 가운데 조준점 + 잠기기 전 안내
+    this.crosshair = el('div', { class: 'hud-crosshair hidden' });
+    this.lookHint = el('div', { class: 'hud-look-hint hidden', html: '🖱️ 화면을 <b>클릭</b>하면 마우스로 시점을 돌려요 · <b>Esc</b> 로 마우스 꺼내기' });
+    this.root.append(this.crosshair, this.lookHint);
 
     this.toastEl = el('div', { class: 'hud-toast hidden' });
     this.root.append(this.toastEl);
@@ -160,6 +165,12 @@ export class HUD {
     p.style.color = color;
     this.root.append(p);
     setTimeout(() => p.remove(), 900);
+  }
+
+  /** 마우스 시점 표시: 켜져 있는데 아직 안 잠겼으면 안내, 잠겼으면 조준점 */
+  setMouseLook(enabled, locked) {
+    this.crosshair.classList.toggle('hidden', !(enabled && locked));
+    this.lookHint.classList.toggle('hidden', !(enabled && !locked));
   }
 
   /** 타워 진행 표시 (null 이면 숨김) */

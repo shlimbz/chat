@@ -659,3 +659,15 @@ body.mobile.chat-mode .hud-tower { display: none; }
 /* 화면 번쩍 (함정·포탈) */
 .hud-flash { position: absolute; inset: 0; pointer-events: none; animation: hud-flash .45s ease-out forwards; }
 @keyframes hud-flash { from { opacity: 1; } to { opacity: 0; } }
+
+/* ════ 마우스 시점 ════ */
+.hud-crosshair {
+  position: absolute; left: 50%; top: 50%; width: 8px; height: 8px; margin: -4px 0 0 -4px; border-radius: 50%;
+  background: rgba(255,255,255,.9); box-shadow: 0 0 0 2px rgba(0,0,0,.35); pointer-events: none;
+}
+.hud-look-hint {
+  position: absolute; left: 50%; bottom: 96px; transform: translateX(-50%); pointer-events: none; white-space: nowrap;
+  background: var(--hud-bg); border-radius: 999px; padding: 6px 14px; font-size: 13px;
+}
+.hud-look-hint b { color: var(--yellow); }
+body.mobile .hud-crosshair, body.mobile .hud-look-hint { display: none; }

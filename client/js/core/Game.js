@@ -98,6 +98,10 @@ export class Game {
       minX: -W, maxX: W, minZ: -D, maxZ: D, maxY: GYM_SIZE.height,
     };
     this.cameraCtl = new CameraController(this.camera, renderer.domElement, { ...this._gymCamBounds });
+    this.cameraCtl.onLockChange = (locked) => {
+      this.player.faceCamera = locked;
+      this.hud.setMouseLook(this.cameraCtl.mouseLook, locked);
+    };
 
     // 플레이어 (온라인이면 서버가 알려준 마지막 위치에서 시작)
     this.playerModel = new CharacterModel(profile.appearance, { nickname: profile.nickname, admin: !!account?.isAdmin });
@@ -117,7 +121,14 @@ export class Game {
     this.hud = new HUD(uiRoot);
     this.hud.setPlayer(profile.nickname, welcome?.self?.level ?? 1, !!account?.isAdmin);
     this.chat = new ChatPanel(this.hud.chatSlot, {
-      onFocusChange: (focused) => { if (focused) this.input.clear(); },
+      onFocusChange: (focused) => {
+        if (focused) {
+          this.input.clear();
+          this.cameraCtl.unlock();
+        } else if (this.input.enabled) {
+          this.cameraCtl.relock();
+        }
+      },
       onExpandChange: (v) => this._setChatMode(v),
       mobile: this.mobile,
     });
@@ -283,6 +294,11 @@ export class Game {
     saveSettings(this.settings);
     this.cameraCtl.sensitivity = CONFIG.MOUSE_SENSITIVITY * this.settings.mouseSensitivity;
     this.cameraCtl.invertY = this.settings.invertY;
+    // PC: 마우스 시점 (클릭해서 고정) / 모바일: 카메라 자동 따라가기
+    this.cameraCtl.mouseLook = !this.mobile && this.settings.mouseLook !== false;
+    if (!this.cameraCtl.mouseLook) this.cameraCtl.unlock();
+    this.cameraCtl.autoFollow = this.settings.camFollow ?? this.mobile;
+    this.hud.setMouseLook(this.cameraCtl.mouseLook, this.cameraCtl.locked);
     this.sfx.enabled = this.settings.sound !== false;
     this._syncMusic();
 
@@ -549,7 +565,13 @@ export class Game {
   _setControlsEnabled(v) {
     this.input.enabled = v;
     this.cameraCtl.enabled = v;
-    if (!v) this.input.clear();
+    if (!v) {
+      this.input.clear();
+      this.cameraCtl.unlock(); // 창을 쓰는 동안 마우스 풀기
+    } else {
+      this.cameraCtl.relock(); // 닫으면 다시 마우스 시점
+    }
+    this.hud.setMouseLook(this.cameraCtl.mouseLook && v, this.cameraCtl.locked);
   }
 
   /** 모바일 채팅 모드: 채팅창을 크게, 조작 버튼 숨김, 3D 는 저속 렌더링(배터리 절약) */
@@ -569,6 +591,11 @@ export class Game {
   }
 
   _escape() {
+    // 마우스 시점에서 Esc 는 먼저 마우스만 풀어 줌 (브라우저 동작) → 그 Esc 로 메뉴까지 열지 않음
+    if (this.cameraCtl.locked || performance.now() - this.cameraCtl.unlockedAt < 300) {
+      this.cameraCtl.unlock();
+      return;
+    }
     if (this.dialog.isOpen()) {
       this.dialog.close();
       return;
@@ -720,12 +747,19 @@ export class Game {
     const ms = this.serverNow();
     const inTower = this.map === MAPS.TOWER;
     // 움직이는 발판을 먼저 옮기고 → 그 위의 캐릭터 이동
-    if (inTower) this.tower.update(dt, ms, this.player.position);
-    else this.gym.update(dt, ms, this.player.position);
+    if (inTower) {
+      this.tower.update(dt, ms, this.player.position);
+      // 선풍기 바람·샌드백 (내 캐릭터만 — 다른 사람은 각자 화면에서 처리 후 위치로 보임)
+      if (!this._respawning && this.tower.pushPlayer(this.player, ms) === 'sandbag') {
+        this.sfx.hit(true);
+        this.hud.pop('퍽!', '#ff8a8a');
+      }
+    } else this.gym.update(dt, ms, this.player.position);
     this.player.update(dt);
     this.remotePlayers.update(dt);
     this.effects.update(dt);
     if (!inTower) this._animateEquipment();
+    this.cameraCtl.followBehind(dt, this.player.rotY, this.player.speed > 0.6 && !this.player.activity);
     this.cameraCtl.update(dt, this.player.position);
     if (!inTower) this.gym.updateBoardFade(dt, this.camera.position, this.player.position);
     else this._towerFrame(ms);
@@ -831,6 +865,8 @@ export class Game {
     this.tower?.setActive(tower);
     this.gym.root.visible = !tower;
     this.player.collision = tower ? this.tower.collision : this.gym.collision;
+    this.player.push.x = 0;
+    this.player.push.z = 0;
     this.cameraCtl.bounds = tower ? { ...TOWER_BOUNDS, maxY: 60 } : { ...this._gymCamBounds };
     this.scene.background = tower ? this.tower.sky : this._gymBackground;
     // 그림자용 햇빛도 지금 맵 쪽으로

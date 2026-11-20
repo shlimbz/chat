@@ -60,6 +60,8 @@ export const DEFAULT_SETTINGS = Object.freeze({
   fpsCap: null, // 30fps 제한 (null = 모바일이면 켬)
   othersFx: true, // 다른 사람 트레일·오라 표시
   music: true, // 득근 타워 배경음악
+  mouseLook: true, // PC: 클릭하면 마우스로 시점 회전 (캐릭터가 보는 방향 = 카메라 방향)
+  camFollow: null, // 카메라 자동 따라가기 (null = 모바일이면 켬)
   keys: Object.freeze({ punch: 'KeyJ', kick: 'KeyK' }), // 공격 키 (설정에서 변경)
 });
 
@@ -80,6 +82,8 @@ export function loadSettings() {
   if (typeof data.fpsCap === 'boolean') s.fpsCap = data.fpsCap;
   if (typeof data.othersFx === 'boolean') s.othersFx = data.othersFx;
   if (typeof data.music === 'boolean') s.music = data.music;
+  if (typeof data.mouseLook === 'boolean') s.mouseLook = data.mouseLook;
+  if (typeof data.camFollow === 'boolean') s.camFollow = data.camFollow;
   const k = data.keys && typeof data.keys === 'object' ? data.keys : {};
   const ok = (c) => typeof c === 'string' && /^[A-Za-z0-9]{2,20}$/.test(c) && !RESERVED_KEYS.has(c);
   s.keys = {

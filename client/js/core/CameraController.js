@@ -29,9 +29,42 @@ export class CameraController {
     this._first = true;
     this._pointers = new Map(); // pointerId → {x, y}  (터치 두 손가락 = 확대/축소)
     this._pinchDist = 0;
+    // 마우스 시점 (PC): 화면을 클릭하면 마우스가 고정되고, 마우스를 움직이는 대로 시점이 돌아감 (Esc 로 해제)
+    this.mouseLook = false;
+    this.locked = false;
+    this.wantLock = false; // 사용자가 직접 Esc 로 풀기 전까지는 다시 잠금
+    this.unlockedAt = 0;
+    this.onLockChange = null;
+    // 자동 따라가기 (모바일): 이동 중에 카메라가 천천히 캐릭터 뒤로 돌아감
+    this.autoFollow = false;
+    this._lastManual = 0;
+
+    this._onLockChange = () => {
+      const was = this.locked;
+      this.locked = document.pointerLockElement === dom;
+      if (was && !this.locked) {
+        this.unlockedAt = performance.now();
+        if (!this._unlocking) this.wantLock = false; // 사용자가 Esc 로 직접 풂
+      }
+      if (this.locked) this.wantLock = true;
+      this._unlocking = false;
+      this.onLockChange?.(this.locked);
+    };
+    this._onMouseMove = (e) => {
+      if (!this.locked || !this.enabled) return;
+      this.yaw -= e.movementX * this.sensitivity * 0.8;
+      this.pitch += e.movementY * this.sensitivity * 0.8 * (this.invertY ? -1 : 1);
+      this.pitch = Math.min(1.25, Math.max(-0.25, this.pitch));
+    };
+    document.addEventListener('pointerlockchange', this._onLockChange);
+    document.addEventListener('mousemove', this._onMouseMove);
 
     this._onDown = (e) => {
       if (!this.enabled) return;
+      if (this.mouseLook && e.pointerType === 'mouse') {
+        if (!this.locked && e.button === 0) this.lock();
+        return; // 마우스 시점에서는 끌기 대신 마우스 움직임으로 회전
+      }
       this._pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
       dom.setPointerCapture?.(e.pointerId);
       dom.classList.add('dragging');
@@ -53,6 +86,7 @@ export class CameraController {
         this._pinchDist = d;
         return;
       }
+      this._lastManual = performance.now();
       const touchBoost = e.pointerType === 'touch' ? 1.5 : 1;
       this.yaw -= dx * this.sensitivity * touchBoost;
       this.pitch += dy * this.sensitivity * touchBoost * (this.invertY ? -1 : 1);
@@ -78,6 +112,44 @@ export class CameraController {
     dom.addEventListener('pointercancel', this._onUp);
     dom.addEventListener('wheel', this._onWheel, { passive: false });
     dom.addEventListener('contextmenu', this._onContext);
+  }
+
+  /** 마우스 고정 (클릭·키 입력 직후에만 브라우저가 허락) */
+  lock() {
+    if (!this.mouseLook || this.locked || !this.dom.requestPointerLock) return;
+    try {
+      const r = this.dom.requestPointerLock();
+      if (r && r.catch) r.catch(() => {});
+    } catch { /* 허락되지 않음 → 다음 클릭 때 */ }
+  }
+
+  /** 메뉴·채팅 등을 열 때 마우스 풀기 (다시 닫으면 relock 으로 복귀) */
+  unlock() {
+    if (!this.locked) return;
+    this._unlocking = true;
+    document.exitPointerLock?.();
+  }
+
+  /** 창을 닫은 뒤: 전에 마우스 시점을 쓰고 있었으면 다시 고정 */
+  relock() {
+    if (this.mouseLook && this.wantLock && !this.locked) this.lock();
+  }
+
+  /**
+   * 자동 따라가기: 앞으로 가는 동안 카메라가 천천히 캐릭터 뒤로 (직접 돌린 뒤 1.5초 동안은 가만히)
+   * @param {number} rotY 캐릭터 방향
+   * @param {boolean} moving
+   */
+  followBehind(dt, rotY, moving) {
+    if (!this.autoFollow || !moving || this.locked) return;
+    if (performance.now() - this._lastManual < 1500 || this._pointers.size) return;
+    let d = (rotY + Math.PI - this.yaw) % (Math.PI * 2);
+    if (d > Math.PI) d -= Math.PI * 2;
+    if (d < -Math.PI) d += Math.PI * 2;
+    if (Math.abs(d) > 2.7) return; // 카메라 쪽으로 걸어오는 중이면 돌리지 않음
+    // 옆으로 갈 때는 천천히, 앞으로 갈 때는 조금 빠르게
+    const rate = 1.6 * (1 - Math.abs(d) / Math.PI);
+    this.yaw += d * Math.min(1, dt * rate);
   }
 
   _pinchDistance() {
@@ -145,6 +217,8 @@ export class CameraController {
     dom.removeEventListener('pointercancel', this._onUp);
     dom.removeEventListener('wheel', this._onWheel);
     dom.removeEventListener('contextmenu', this._onContext);
+    document.removeEventListener('pointerlockchange', this._onLockChange);
+    document.removeEventListener('mousemove', this._onMouseMove);
   }
 }
 

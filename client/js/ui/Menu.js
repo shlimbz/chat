@@ -210,6 +210,8 @@ export class Menu {
     this.fpsCapInput = el('input', { attrs: { type: 'checkbox' } });
     this.othersFxInput = el('input', { attrs: { type: 'checkbox' } });
     this.musicInput = el('input', { attrs: { type: 'checkbox' } });
+    this.mouseLookInput = el('input', { attrs: { type: 'checkbox' } });
+    this.camFollowInput = el('input', { attrs: { type: 'checkbox' } });
     this.keys = { ...DEFAULT_SETTINGS.keys };
     this.keyBtns = {};
     this.keyMsg = el('div', { class: 'menu-hint' });
@@ -227,13 +229,15 @@ export class Menu {
         fpsCap: this.fpsCapInput.checked,
         othersFx: this.othersFxInput.checked,
         music: this.musicInput.checked,
+        mouseLook: this.mouseLookInput.checked,
+        camFollow: this.camFollowInput.checked,
         keys: { ...this.keys },
       };
       this.sensValue.textContent = `${s.mouseSensitivity.toFixed(1)}x`;
       this.h.onSettingsChange?.(s);
     };
     this._emitSettings = emit;
-    for (const input of [this.sensInput, this.invertInput, this.nameTagInput, this.fpsInput, this.soundInput, this.autoResInput, this.fpsCapInput, this.othersFxInput, this.musicInput]) {
+    for (const input of [this.sensInput, this.invertInput, this.nameTagInput, this.fpsInput, this.soundInput, this.autoResInput, this.fpsCapInput, this.othersFxInput, this.musicInput, this.mouseLookInput, this.camFollowInput]) {
       input.addEventListener('input', emit);
     }
 
@@ -250,6 +254,8 @@ export class Menu {
       el('div', { class: 'menu-row' }, [el('span', { text: '그래픽 품질' }), this.qualityBox]),
       el('div', { class: 'menu-hint', text: '높음: 실시간 그림자·거울 반사 (무거움)' }),
       el('label', { class: 'menu-row' }, [el('span', { text: '마우스 감도' }), this.sensInput, this.sensValue]),
+      ...(this.h.isMobile ? [] : [el('label', { class: 'menu-row' }, [el('span', { text: '마우스 시점 (화면 클릭 → 마우스로 시점 회전)' }), this.mouseLookInput])]),
+      el('label', { class: 'menu-row' }, [el('span', { text: '카메라 자동 따라가기 (이동 방향 뒤로)' }), this.camFollowInput]),
       el('label', { class: 'menu-row' }, [el('span', { text: '카메라 상하 반전' }), this.invertInput]),
       el('label', { class: 'menu-row' }, [el('span', { text: '닉네임 표시' }), this.nameTagInput]),
       el('label', { class: 'menu-row' }, [el('span', { text: '해상도 자동 조절 (버벅이면 자동으로 낮춤)' }), this.autoResInput]),
@@ -319,6 +325,8 @@ export class Menu {
     this.fpsCapInput.checked = s.fpsCap ?? !!this.h.isMobile;
     this.othersFxInput.checked = s.othersFx !== false;
     this.musicInput.checked = s.music !== false;
+    this.mouseLookInput.checked = s.mouseLook !== false;
+    this.camFollowInput.checked = s.camFollow ?? !!this.h.isMobile;
     this.keys = { ...DEFAULT_SETTINGS.keys, ...(s.keys || {}) };
     this._syncKeys();
     this.quality = s.quality;

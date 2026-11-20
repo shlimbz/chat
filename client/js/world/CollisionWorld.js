@@ -28,6 +28,26 @@ export class CollisionWorld {
     return b;
   }
 
+  /** 원기둥 (원판 모양 발판). 위에서 보면 원 — 판정도 원으로 */
+  addCylinder(cx, cz, r, tag = '', top = Infinity, bottom = -Infinity) {
+    const b = this.addBox(cx - r, cx + r, cz - r, cz + r, tag, top, bottom);
+    b.round = true;
+    b.cx = cx;
+    b.cz = cz;
+    b.r = r;
+    return b;
+  }
+
+  /** 점(x,z)이 반지름 pad 만큼 넓힌 상자/원 안에 있는지 */
+  static covers(b, x, z, pad) {
+    if (b.round) {
+      const dx = x - b.cx;
+      const dz = z - b.cz;
+      return dx * dx + dz * dz <= (b.r + pad) * (b.r + pad);
+    }
+    return !(x + pad < b.minX || x - pad > b.maxX || z + pad < b.minZ || z - pad > b.maxZ);
+  }
+
   /**
    * 로컬 좌표 박스를 (위치, Y회전) 으로 변환해 월드 AABB로 추가
    * @param {{minX:number,maxX:number,minZ:number,maxZ:number,top?:number}} local
@@ -63,6 +83,18 @@ export class CollisionWorld {
       let moved = false;
       for (const b of this.boxes) {
         if (b.off || b.top <= clearY || b.bottom >= headY) continue;
+        if (b.round) {
+          const dx = pos.x - b.cx;
+          const dz = pos.z - b.cz;
+          const d = Math.hypot(dx, dz);
+          if (d >= b.r + r) continue;
+          moved = true;
+          const nx = d > 1e-6 ? dx / d : 1;
+          const nz = d > 1e-6 ? dz / d : 0;
+          pos.x = b.cx + nx * (b.r + r);
+          pos.z = b.cz + nz * (b.r + r);
+          continue;
+        }
         const cx = Math.min(Math.max(pos.x, b.minX), b.maxX);
         const cz = Math.min(Math.max(pos.z, b.minZ), b.maxZ);
         const dx = pos.x - cx;
@@ -105,7 +137,7 @@ export class CollisionWorld {
     const limit = feetY + STEP_HEIGHT;
     for (const b of this.boxes) {
       if (b.off || b.top === Infinity || b.top > limit || b.top <= ground) continue;
-      if (x + r < b.minX || x - r > b.maxX || z + r < b.minZ || z - r > b.maxZ) continue;
+      if (!CollisionWorld.covers(b, x, z, r)) continue;
       ground = b.top;
       box = b;
     }
@@ -119,7 +151,7 @@ export class CollisionWorld {
     for (const b of this.boxes) {
       if (b.off || b.bottom === -Infinity) continue;
       if (b.bottom < fromY + BODY_HEIGHT - 0.01 || b.bottom > toY + BODY_HEIGHT || b.bottom >= ceil) continue;
-      if (x + r < b.minX || x - r > b.maxX || z + r < b.minZ || z - r > b.maxZ) continue;
+      if (!CollisionWorld.covers(b, x, z, r)) continue;
       ceil = b.bottom;
     }
     return ceil;
@@ -130,6 +162,10 @@ export class CollisionWorld {
     const clearY = feetY + STEP_HEIGHT;
     for (const b of this.boxes) {
       if (b.off || b.top <= clearY || b.bottom >= feetY + BODY_HEIGHT) continue;
+      if (b.round) {
+        if (Math.hypot(pos.x - b.cx, pos.z - b.cz) < b.r + r) return true;
+        continue;
+      }
       const cx = Math.min(Math.max(pos.x, b.minX), b.maxX);
       const cz = Math.min(Math.max(pos.z, b.minZ), b.maxZ);
       const dx = pos.x - cx;

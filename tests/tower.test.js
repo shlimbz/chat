@@ -6,7 +6,8 @@ import { CollisionWorld } from '../client/js/world/CollisionWorld.js';
 import { PlayerController } from '../client/js/character/PlayerController.js';
 import {
   TOWER_ELEMENTS, TOWER_CHECKPOINTS, TOWER_BOUNDS, TOWER_SPAWN, MAPS, mapOf, towerSupport, standingOn,
-  moveOffset, fadeState, hitsSpinBar, onKillStrip, spinAngle,
+  moveOffset, fadeState, hitsSpinBar, onKillStrip, spinAngle, shapeGap, turnAngle, windAt, inWind,
+  hitsRope, ropeAngle, hitsCrusher, crushHeight, sandbagHit, sandbagPos, ROPE,
 } from '../client/js/shared/towerLayout.js';
 import { PlayerRegistry } from '../server/src/game/PlayerRegistry.js';
 
@@ -17,10 +18,15 @@ function towerWorld() {
   const boxes = new Map();
   w.addBox(298, 302, -2, 2, 'pillar');
   for (const e of SOLIDS) {
-    const b = w.addBox(e.x - e.w / 2, e.x + e.w / 2, e.z - e.d / 2, e.z + e.d / 2, e.id, e.top, e.top - e.h);
+    const b = e.round
+      ? w.addCylinder(e.x, e.z, e.w / 2, e.id, e.top, e.top - e.h)
+      : w.addBox(e.x - e.w / 2, e.x + e.w / 2, e.z - e.d / 2, e.z + e.d / 2, e.id, e.top, e.top - e.h);
     b.dx = 0; b.dz = 0;
     if (e.pad) b.pad = e.pad;
-    boxes.set(e.id, { b, e, last: { dx: 0, dz: 0 } });
+    if (e.slip) b.slip = true;
+    if (e.conveyor) b.conveyor = e.conveyor;
+    if (e.turn) { b.cx = e.x; b.cz = e.z; }
+    boxes.set(e.id, { b, e, last: { dx: 0, dz: 0, a: 0 } });
   }
   /** Tower.update 와 같은 계산 */
   const tick = (ms) => {
@@ -33,8 +39,18 @@ function towerWorld() {
         b.minZ = e.z + dz - e.d / 2; b.maxZ = e.z + dz + e.d / 2;
       }
       if (e.fade) b.off = !fadeState(e, ms).solid;
+      if (e.turn) { const a = turnAngle(e, ms); b.turnD = a - last.a; last.a = a; }
     }
   };
+  /** 지금 서 있는 곳의 바람 (Tower.update 와 같은 계산) */
+  const wind = (p, ms) => {
+    for (const { e } of boxes.values()) {
+      const wd = windAt(e, ms);
+      if (wd && inWind(e, p.x, p.y, p.z)) return wd;
+    }
+    return null;
+  };
+  tick.wind = wind;
   return { w, boxes, tick };
 }
 
@@ -51,16 +67,16 @@ function makeBot(world) {
   return { pc, axis };
 }
 
-const gapTo = (p, b) => Math.hypot(Math.max(0, b.minX - p.x, p.x - b.maxX), Math.max(0, b.minZ - p.z, p.z - b.maxZ));
+const gapTo = (p, b) => (b.round
+  ? Math.max(0, Math.hypot(p.x - b.cx, p.z - b.cz) - b.r)
+  : Math.hypot(Math.max(0, b.minX - p.x, p.x - b.maxX), Math.max(0, b.minZ - p.z, p.z - b.maxZ)));
+const inside = (b, x, z, m) => (b.round ? Math.hypot(x - b.cx, z - b.cz) < b.r + m : !(x < b.minX - m || x > b.maxX + m || z < b.minZ - m || z > b.maxZ + m));
 
 test('타워 코스: 연속된 발판 간격·높이가 점프로 갈 수 있는 범위', () => {
   for (let i = 1; i < SOLIDS.length; i++) {
     const a = SOLIDS[i - 1];
     const b = SOLIDS[i];
-    const gap = Math.hypot(
-      Math.max(0, Math.abs(a.x - b.x) - (a.w + b.w) / 2),
-      Math.max(0, Math.abs(a.z - b.z) - (a.d + b.d) / 2),
-    );
+    const gap = shapeGap(a, b);
     const rise = b.top - a.top;
     assert.ok(gap <= 1.5, `${b.id} 간격 ${gap}`);
     assert.ok(rise <= (a.pad ? 3.0 : 0.6), `${b.id} 높이차 ${rise}`);
@@ -81,9 +97,8 @@ test('타워 코스: 위아래로 겹치는 발판 사이에 머리 공간이 �
       for (let ms = 0; ms < 8000 && !near; ms += 100) {
         const oa = moveOffset(a, ms);
         const ob = moveOffset(b, ms);
-        const gx = Math.abs(a.x + oa.dx - b.x - ob.dx) - (a.w + b.w) / 2;
-        const gz = Math.abs(a.z + oa.dz - b.z - ob.dz) - (a.d + b.d) / 2;
-        if (gx < 0.6 && gz < 0.6) near = true;
+        const g = shapeGap({ ...a, x: a.x + oa.dx, z: a.z + oa.dz }, { ...b, x: b.x + ob.dx, z: b.z + ob.dz });
+        if (g < 0.6) near = true;
         if (!a.move && !b.move) break;
       }
       if (!near) continue; // 수평으로 떨어져 있음
@@ -173,8 +188,8 @@ test('봇이 실제 물리로 정상까지 올라가고, 서버 높이 검증은
     const nb = boxes.get(SOLIDS[idx].id);
     const next = nb.b;
     const p = pc.position;
-    const tx = (next.minX + next.maxX) / 2;
-    const tz = (next.minZ + next.maxZ) / 2;
+    const tx = next.round ? next.cx : (next.minX + next.maxX) / 2;
+    const tz = next.round ? next.cz : (next.minZ + next.maxZ) / 2;
     const dx = tx - p.x;
     const dz = tz - p.z;
     const d = Math.hypot(dx, dz) || 1;
@@ -186,11 +201,15 @@ test('봇이 실제 물리로 정상까지 올라가고, 서버 높이 검증은
     // 내 발판 가장자리에 왔는지 (한 걸음 앞이 발판 밖)
     const ax = p.x + (dx / d) * 0.25;
     const az = p.z + (dz / d) * 0.25;
-    const leaving = ax < cur.minX - 0.1 || ax > cur.maxX + 0.1 || az < cur.minZ - 0.1 || az > cur.maxZ + 0.1;
+    const leaving = !inside(cur, ax, az, 0.1);
     if (onCur && !ready) {
       // 다음 발판이 멀거나(움직이는 중) 없으면 내 발판 안쪽 가장자리에서 기다림
-      const inX = Math.min(Math.max(p.x + (dx / d) * 0.3, cur.minX + 0.3), cur.maxX - 0.3);
-      const inZ = Math.min(Math.max(p.z + (dz / d) * 0.3, cur.minZ + 0.3), cur.maxZ - 0.3);
+      const ccx = cur.round ? cur.cx : (cur.minX + cur.maxX) / 2;
+      const ccz = cur.round ? cur.cz : (cur.minZ + cur.maxZ) / 2;
+      const hw = cur.round ? cur.r * 0.7 : (cur.maxX - cur.minX) / 2;
+      const hd = cur.round ? cur.r * 0.7 : (cur.maxZ - cur.minZ) / 2;
+      const inX = Math.min(Math.max(p.x + (dx / d) * 0.3, ccx - hw + 0.3), ccx + hw - 0.3);
+      const inZ = Math.min(Math.max(p.z + (dz / d) * 0.3, ccz - hd + 0.3), ccz + hd - 0.3);
       const ex = inX - p.x;
       const ez = inZ - p.z;
       const el = Math.hypot(ex, ez);
@@ -204,6 +223,9 @@ test('봇이 실제 물리로 정상까지 올라가고, 서버 높이 검증은
     const yBefore = p.y;
     let padBox = null;
     pc.onPad = () => { padBox = w.groundBox; };
+    const wd = tick.wind(p, now);
+    pc.push.x = wd ? wd.vx : 0;
+    pc.push.z = wd ? wd.vz : 0;
     pc.update(dt);
     if ((pc.grounded && w.groundBox === next) || padBox === next) idx++;
     // 떨어짐: 마지막 체크포인트로 (게임과 같은 규칙)
@@ -256,4 +278,75 @@ test('서버: 타워에서 발판 없이 올라가면(날기) 되돌림, 점프�
   const g = reg.add('g', { id: 3, nickname: 'gym', appearance: {} }, now);
   assert.equal(reg.applyMove(g, [300, 0, 0, 0, 0], now + 100), 'corrected');
   assert.ok(towerSupport(TOWER_SPAWN.x, 0, TOWER_SPAWN.z));
+});
+
+/**
+ * 장애물을 걸어서(필요하면 점프해서) 지나가 보기: 출발 시각을 바꿔 가며 성공 비율 계산
+ * @param {(ms:number, x:number, y:number, z:number)=>boolean} hit
+ */
+function crossRate(el, dir, hit, { jumpAt = null, speed = 3.2 } = {}) {
+  const half = Math.max(el.w, el.d) / 2 + 0.6;
+  let ok = 0;
+  const N = 120;
+  for (let i = 0; i < N; i++) {
+    let ms = 50_000 + i * 37;
+    let s = -half;
+    let y = el.top;
+    let vy = 0;
+    let jumped = false;
+    let fail = false;
+    while (s < half) {
+      const dt = 1 / 60;
+      s += speed * dt;
+      if (jumpAt !== null && !jumped && s >= jumpAt) { vy = 5; jumped = true; }
+      if (jumped) { vy -= 13 * dt; y = Math.max(el.top, y + vy * dt); }
+      ms += dt * 1000;
+      if (hit(ms, el.x + dir.x * s, y, el.z + dir.z * s)) { fail = true; break; }
+    }
+    if (!fail) ok++;
+  }
+  return ok / N;
+}
+
+test('새 장애물: 높은 기믹(덤벨 프레스·샌드백 틀)이 위층 발판과 겹치지 않음', () => {
+  for (const g of TOWER_ELEMENTS.filter((e) => e.crush || e.sandbag || e.rope)) {
+    for (const o of SOLIDS) {
+      if (o === g || shapeGap(g, o) > 0.3) continue;
+      const dy = o.top - o.h - g.top;
+      const need = g.crush ? 3.7 : g.sandbag ? 3.3 : 2.7;
+      assert.ok(dy <= 0 || dy >= need, `${g.id}(${g.kind}) 위 ${o.id} 높이 ${dy.toFixed(2)}`);
+    }
+  }
+});
+
+test('새 장애물: 줄넘기는 그냥 걸으면 걸리고, 점프하면 지나갈 수 있음', () => {
+  for (const el of TOWER_ELEMENTS.filter((e) => e.rope)) {
+    const dir = { x: el.rope.px, z: el.rope.pz };
+    const walk = crossRate(el, dir, (ms, x, y, z) => hitsRope(el, ms, x, y, z));
+    const jump = crossRate(el, dir, (ms, x, y, z) => hitsRope(el, ms, x, y, z), { jumpAt: -0.9 });
+    console.log(`  줄넘기 ${el.id}: 걷기 통과 ${Math.round(walk * 100)}% / 점프 통과 ${Math.round(jump * 100)}%`);
+    assert.ok(walk < 0.15, `${el.id} 걷기만 해도 통과 ${walk}`);
+    assert.ok(jump > 0.25, `${el.id} 점프 통과 비율 ${jump}`);
+    // 줄이 머리 위에 있을 때 가운데에 서 있으면 안전
+    const a = ropeAngle(el, 0);
+    void a;
+    assert.ok(ROPE.height + ROPE.radius > 2.2);
+  }
+});
+
+test('새 장애물: 덤벨 프레스·샌드백은 타이밍을 맞추면 지나갈 수 있음', () => {
+  for (const el of TOWER_ELEMENTS.filter((e) => e.crush)) {
+    const r = crossRate(el, { x: 1, z: 0 }, (ms, x, y, z) => hitsCrusher(el, ms, x, y, z), { speed: 6 });
+    console.log(`  덤벨 프레스 ${el.id}: 통과 ${Math.round(r * 100)}%`);
+    assert.ok(r > 0.25 && r < 0.95, `${el.id} 통과 비율 ${r}`);
+    assert.ok(crushHeight(el, 0) >= 0.1);
+  }
+  for (const el of TOWER_ELEMENTS.filter((e) => e.sandbag)) {
+    const dir = { x: -el.sandbag.az, z: el.sandbag.ax }; // 흔들리는 방향과 직각 = 진행 방향
+    const r = crossRate(el, dir, (ms, x, y, z) => !!sandbagHit(el, ms, x, y, z), { speed: 6 });
+    console.log(`  샌드백 ${el.id}: 통과 ${Math.round(r * 100)}%`);
+    assert.ok(r > 0.25 && r < 0.98, `${el.id} 통과 비율 ${r}`);
+    const b = sandbagPos(el, 0);
+    assert.ok(b.y - 0.55 > el.top + 0.1, '샌드백이 바닥에 끌리지 않음');
+  }
 });

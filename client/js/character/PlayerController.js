@@ -33,6 +33,8 @@ export class PlayerController {
     this.activity = null; // 앉기·기구 운동 중이면 { it(상호작용 대상), type }
     // 매 프레임 새 객체를 만들지 않도록 재사용 (가비지 컬렉션 줄이기)
     this._zeroAxis = { x: 0, y: 0 };
+    this.push = { x: 0, z: 0 }; // 바람 등 바깥에서 미는 속도 (m/s, 맵이 매 프레임 설정)
+    this.faceCamera = false; // 마우스 시점 모드: 항상 카메라가 보는 쪽을 바라봄 (옆걸음 가능)
 
     input.onPress('Space', () => this.requestJump());
   }
@@ -185,10 +187,12 @@ export class PlayerController {
     const maxSpeed = this.input.isRunning() ? CONFIG.RUN_SPEED : CONFIG.WALK_SPEED;
     const tx = mx * maxSpeed * (len > 0 ? Math.max(0.35, strength) : 0);
     const tz = mz * maxSpeed * (len > 0 ? Math.max(0.35, strength) : 0);
-    const a = Math.min(1, dt * CONFIG.ACCELERATION * (this.grounded ? 1 : 0.35)); // 공중에서는 방향 전환이 느림
+    // 공중에서는 방향 전환이 느림, 미끄러운 바닥(땀)에서는 훨씬 더 느림
+    const slip = this.grounded && this._standBox?.slip;
+    const a = Math.min(1, dt * CONFIG.ACCELERATION * (this.grounded ? (slip ? 0.13 : 1) : 0.35));
     this.velocity.x += (tx - this.velocity.x) * a;
     this.velocity.z += (tz - this.velocity.z) * a;
-    if (len === 0 && Math.hypot(this.velocity.x, this.velocity.z) < 0.05) {
+    if (len === 0 && !slip && Math.hypot(this.velocity.x, this.velocity.z) < 0.05) {
       this.velocity.x = 0;
       this.velocity.z = 0;
     }
@@ -199,9 +203,30 @@ export class PlayerController {
 
     // 움직이는 발판 위에 서 있으면 발판과 함께 이동
     const stand = this._standBox;
-    if (this.grounded && stand && !stand.off && (stand.dx || stand.dz)) {
-      this.position.x += stand.dx;
-      this.position.z += stand.dz;
+    if (this.grounded && stand && !stand.off) {
+      if (stand.dx || stand.dz) {
+        this.position.x += stand.dx;
+        this.position.z += stand.dz;
+      }
+      // 러닝머신 벨트: 뒤로 밀어냄
+      if (stand.conveyor) {
+        this.position.x += stand.conveyor.vx * dt;
+        this.position.z += stand.conveyor.vz * dt;
+      }
+      // 회전 원판: 판과 함께 돎
+      if (stand.turnD) {
+        const c = Math.cos(stand.turnD);
+        const sn = Math.sin(stand.turnD);
+        const rx = this.position.x - stand.cx;
+        const rz = this.position.z - stand.cz;
+        this.position.x = stand.cx + rx * c + rz * sn;
+        this.position.z = stand.cz - rx * sn + rz * c;
+        if (!this.faceCamera) this.rotY += stand.turnD;
+      }
+    }
+    if (this.push.x || this.push.z) {
+      this.position.x += this.push.x * dt;
+      this.position.z += this.push.z * dt;
     }
     const prevX = this.position.x;
     const prevZ = this.position.z;
@@ -255,8 +280,11 @@ export class PlayerController {
       this.onPad?.();
     }
 
-    // 이동 방향으로 회전 (맞아서 밀려날 때는 그대로)
-    if (len > 0 && !down) {
+    // 마우스 시점: 카메라가 보는 쪽을 바라봄 / 아니면 이동 방향으로 회전 (맞아서 밀려날 때는 그대로)
+    if (this.faceCamera && !down) {
+      const targetRot = Math.atan2(f.x, f.z);
+      this.rotY = lerpAngle(this.rotY, targetRot, Math.min(1, dt * 18));
+    } else if (len > 0 && !down) {
       const targetRot = Math.atan2(mx, mz);
       this.rotY = lerpAngle(this.rotY, targetRot, Math.min(1, dt * CONFIG.TURN_SPEED));
     }
